@@ -11,7 +11,7 @@ This work is led by the Institut National de Recherche Biomédicale (INRB) Kinsh
  - **DRC health zones**: [Humanitarian Data Exchange](https://data.humdata.org/dataset/drc-health-data) (MoH zones de santé shapefile)
 - **Population raster**: [GRID3 v4.4 gridded population](https://data.grid3.org/maps/a3db539c0fae4c05aed92ed67e11fe2b/about)
 - **Health facilities**: [GRID3 COD Health Facilities v8.0](https://data.grid3.org/datasets/GRID3::grid3-cod-health-facilities-v8-0/about)
-- **Refugee / IDP sites**: OpenStreetMap[https://www.openstreetmap.org/] (via Overpass API)
+- **Refugee / IDP sites**: [OpenStreetMap](https://www.openstreetmap.org/) (via Overpass API)
 - **Flowminder**: [Flowminder](https://www.flowminder.org/) 
 - **Displaced Movement Outputs**: [IOM](https://dtm.iom.int/)
 
