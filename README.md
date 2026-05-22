@@ -3,7 +3,7 @@
 ![Logos for Project Lead Organizations: Institute National de Recherche Biomedicale (INRB), One Health Institute for Africa (INOHA), Institut National de Santé Publique (INSP), and Unité de Modélisation et Intelligence Epidémique (UMIE)](https://scarpino.github.io/files/drc_logos.png)
 
 ## Contributors
-This work is led by the Institut National de Recherche Biomédicale (INRB)/One Health Institute for Africa (INOHA) Kinshasa (Dav Ebengo, Placide Mbala-Kingebeni and Tania Bishola), and the Institut National de Santé Publique (INSP) (Pierre Akilimali, Adelard Lofungola) in collaboration with partners across the University of Oxford and Northeastern University; please contact dav.ebengo@umie-inrb.org for further information.
+This work is led by the Institut National de Recherche Biomédicale (INRB) Kinshasa/One Health Institute for Africa (INOHA) Kinshasa (Dav Ebengo, Placide Mbala-Kingebeni and Tania Bishola), and the Institut National de Santé Publique (INSP) (Pierre Akilimali, Adelard Lofungola) in collaboration with partners across the University of Oxford and Northeastern University; please contact dav.ebengo@umie-inrb.org or pierre.akilimali@insp.cd for further information.
 
 ## Data
 - **Geo-Harmonized Data**: [Global.health](https://github.com/kraemer-lab/Ebola_DRC_2026)
