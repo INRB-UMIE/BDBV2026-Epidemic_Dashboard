@@ -30,10 +30,14 @@
   /* Phones / very narrow viewports: shrink panels, dim padding, default the
      zone info panel to collapsed so the map stays usable. */
   @media (max-width: 700px) {
-    .panel          { font-size:12px; padding:8px 10px; }
-    #title          { min-width:unset; max-width:calc(100vw - 24px); }
-    #title h1       { font-size:18px; }
-    #tracker .global-cell .num { font-size:22px; }
+    .panel          { font-size:12px; padding:6px 8px; }
+    #title          { min-width:unset; max-width:calc(100vw - 24px); padding:6px 8px; }
+    #title h1       { margin-bottom:2px; }
+    #title .sub     { font-size:10px; }
+    #tracker        { margin-top:4px; padding:4px 2px 0; }
+    #tracker .global-row { gap:14px; }
+    #tracker .countries-row { gap:2px; margin-top:6px; }
+    #tracker .country { gap:3px 6px; }
     #info           { max-width:60vw; }
     #legend         { max-width:60vw; }
     /* Force exactly two columns on phones so logos lay out as 2×2 instead of
@@ -51,18 +55,18 @@
     #partners img  { max-width:100%; height:auto; width:auto;
                       max-height:clamp(14px, 4vw, 18px); object-fit:contain; }
   }
-  #title        { top:12px; left:50%; transform:translateX(-50%); text-align:center; min-width:520px; }
+  #title        { top:12px; left:50%; transform:translateX(-50%); text-align:center; min-width:min(520px, calc(100vw - 24px)); max-width:calc(100vw - 24px); box-sizing:border-box; }
   #title .title-row { display:flex; align-items:center; justify-content:center; gap:14px; }
   /* branding row removed */
   /* Case-count tracker — large, conspicuous numbers right under the title. */
   /* Tracker layout: centered text stack (global stats + per-country rows). */
   #tracker { display:flex; flex-direction:column; align-items:center; margin-top:6px; padding:6px 4px 0; border-top:1px solid #333; }
   #tracker .stats-block  { display:flex; flex-direction:column; align-items:center; }
-  #tracker .global-title { font-size:10px; color:#bbb; text-transform:uppercase; letter-spacing:0.6px; margin-bottom:2px; text-align:center; }
-  #tracker .global-row { display:flex; align-items:flex-end; gap:36px; line-height:1.05; }
+  #tracker .global-title { font-size:clamp(9px, 1.5vw, 10px); color:#bbb; text-transform:uppercase; letter-spacing:0.6px; margin-bottom:2px; text-align:center; }
+  #tracker .global-row { display:flex; align-items:flex-end; gap:clamp(14px, 6vw, 36px); line-height:1.05; }
   #tracker .global-cell { display:flex; flex-direction:column; align-items:center; }
-  #tracker .global-cell .num { font-size:30px; font-weight:700; font-variant-numeric: tabular-nums; line-height:1; }
-  #tracker .global-cell .sub { font-size:10px; color:#bbb; text-transform:uppercase; letter-spacing:0.6px; margin-top:2px; }
+  #tracker .global-cell .num { font-size:clamp(20px, 6vw, 30px); font-weight:700; font-variant-numeric: tabular-nums; line-height:1; }
+  #tracker .global-cell .sub { font-size:clamp(9px, 1.5vw, 10px); color:#bbb; text-transform:uppercase; letter-spacing:0.6px; margin-top:2px; }
   #tracker .global-cell.cases  .num { color:#ffd166; }
   #tracker .global-cell.deaths .num { color:#ff4d4d; }
   /* Partner logos strip — bottom-right of the map, white-tile background so
@@ -80,7 +84,7 @@
   #partners a:hover { opacity:0.78; }
   #partners img { height:clamp(28px, 5vw, 48px); width:auto;
                   max-width:min(28vw, 160px); display:block; object-fit:contain; }
-  #tracker .countries-row { display:flex; flex-direction:column; align-items:center; gap:3px; margin-top:8px; font-size:11px; color:#ddd; }
+  #tracker .countries-row { display:flex; flex-direction:column; align-items:center; gap:3px; margin-top:8px; font-size:clamp(10px, 1.6vw, 11px); color:#ddd; }
   #tracker .country { display:flex; flex-wrap:wrap; align-items:baseline; gap:4px 8px; justify-content:center; }
   #tracker .country .name { color:#9fcdfb; font-weight:600; }
   #tracker .country .nums { font-variant-numeric: tabular-nums; }
@@ -91,7 +95,7 @@
   #tracker .country .dot { color:#444; }
   #tracker .country .sub { font-size:10px; color:#888; }
   /* surveillance panel removed */
-  #title h1 { margin:0 0 4px 0; font-size:22px; font-weight:700; letter-spacing:0.3px; }
+  #title h1 { margin:0 0 4px 0; font-size:clamp(16px, 3.4vw, 22px); font-weight:700; letter-spacing:0.3px; }
   #title .sub { font-size:11px; opacity:0.8; }
   select, button { background:#222; color:#eee; border:1px solid #444; padding:4px 6px; border-radius:4px; font-size:12px; }
   label { display:block; margin-top:6px; font-size:12px; color:#bbb; }
