@@ -372,21 +372,21 @@ def load_metadata(
         rec["n_health_facilities"] = _i(
             g3.get("healthsite_count", {}).get("healthsite_count"))
 
-        # Epi: prefer INSP sitrep cumulative (more recent) over epi snapshot
+        # Epi: prefer INSP sitrep cumulative (more recent) over epi snapshot.
+        # Use explicit None checks — `or` would treat 0 as falsy.
         insp = props.get("insp_sitrep", {})
         epi = props.get("epi", {}).get("cases", {})
-        rec["confirmed_cases"] = _i(
-            insp.get("cumulative_confirmed_cases", {}).get("cumulative_confirmed_cases")
-        ) or _i(epi.get("confirmed_cases"))
-        rec["confirmed_deaths"] = _i(
-            insp.get("cumulative_confirmed_deaths", {}).get("cumulative_confirmed_deaths")
-        ) or _i(epi.get("confirmed_deaths"))
-        rec["suspected_cases"] = _i(
-            insp.get("cumulative_suspected_cases", {}).get("cumulative_suspected_cases")
-        ) or _i(epi.get("suspected_cases"))
-        rec["suspected_deaths"] = _i(
-            insp.get("cumulative_suspected_deaths", {}).get("cumulative_suspected_deaths")
-        ) or _i(epi.get("suspected_deaths"))
+        for dst, insp_key, epi_key in (
+            ("confirmed_cases",  "cumulative_confirmed_cases",  "confirmed_cases"),
+            ("confirmed_deaths", "cumulative_confirmed_deaths", "confirmed_deaths"),
+            ("suspected_cases",  "cumulative_suspected_cases",  "suspected_cases"),
+            ("suspected_deaths", "cumulative_suspected_deaths", "suspected_deaths"),
+        ):
+            v = _i(insp.get(insp_key, {}).get(insp_key))
+            if v is None:
+                v = _i(epi.get(epi_key))
+            rec[dst] = v
+        rec["total_cases"] = (rec.get("confirmed_cases") or 0) + (rec.get("suspected_cases") or 0)
 
         # Refugee/IDP site count
         rs = props.get("refugee_sites", {})
@@ -445,7 +445,7 @@ def compute_global_sitrep_totals() -> dict:
         "per_country": [],
     }
     if not SIT_REPS_DIR.exists():
-        return out
+        return None
     dated = []
     for p in SIT_REPS_DIR.iterdir():
         if not p.is_file() or p.suffix.lower() != ".csv":
@@ -455,7 +455,7 @@ def compute_global_sitrep_totals() -> dict:
         except ValueError:
             continue
     if not dated:
-        return out
+        return None
     _, path = max(dated)
     sr_all = pd.read_csv(path)
     sr_all.columns = [c.strip().lower() for c in sr_all.columns]
@@ -757,6 +757,7 @@ def load_partners() -> list[dict]:
 
 LAYER_DEFS = [
     # (group, layer_id, label, csv_col, palette, scale)
+    ("Observed (epi update)",  "obs::total",     "Total cases (confirmed + suspected)",              "total_cases",      "reds",     "log"),
     ("Observed (epi update)",  "obs::confirmed", "Confirmed cases",                                 "confirmed_cases",  "reds",     "log"),
     ("Observed (epi update)",  "obs::suspected", "Suspected cases",                                 "suspected_cases",  "reds",     "log"),
     ("Observed (epi update)",  "obs::conf_d",    "Confirmed deaths",                                "confirmed_deaths", "reds",     "log"),
@@ -825,7 +826,28 @@ def build_payload() -> dict:
     print(f"  terms HTML: {len(terms_html)} chars (updated {terms_updated!r})")
     partners = load_partners()
     print(f"  partner logos: {[p['alt'] for p in partners]}")
-    totals = {**case_totals, **compute_global_sitrep_totals()}
+    sitrep = compute_global_sitrep_totals()
+    if sitrep is None:
+        sitrep = {
+            "global_confirmed_cases":  case_totals.get("confirmed_cases", 0),
+            "global_suspected_cases":  case_totals.get("suspected_cases", 0),
+            "global_confirmed_deaths": case_totals.get("confirmed_deaths", 0),
+            "global_suspected_deaths": case_totals.get("suspected_deaths", 0),
+            "global_total_cases":      case_totals.get("confirmed_cases", 0)
+                                       + case_totals.get("suspected_cases", 0),
+            "affected_countries": ["DRC"],
+            "affected_country_count": 1,
+            "per_country": [{
+                "country": "DRC",
+                "confirmed_cases":  case_totals.get("confirmed_cases", 0),
+                "suspected_cases":  case_totals.get("suspected_cases", 0),
+                "confirmed_deaths": case_totals.get("confirmed_deaths", 0),
+                "suspected_deaths": case_totals.get("suspected_deaths", 0),
+                "total": case_totals.get("confirmed_cases", 0)
+                         + case_totals.get("suspected_cases", 0),
+            }],
+        }
+    totals = {**case_totals, **sitrep}
     print(f"  case totals: confirmed={totals.get('confirmed_cases', 0)}, "
           f"suspected={totals.get('suspected_cases', 0)}, "
           f"affected zones={totals.get('affected_zones', 0)}")
@@ -1329,6 +1351,7 @@ function infoHTML(feature) {
 
   h += "<h4>Observed cases (" + PAYLOAD.asof + ")</h4>";
   h += "<table>";
+  h += "<tr><td>total</td><td>" + fmt(z.total_cases) + "</td></tr>";
   h += "<tr><td>confirmed</td><td>" + fmt(z.confirmed_cases) + "</td></tr>";
   h += "<tr><td>confirmed deaths</td><td>" + fmt(z.confirmed_deaths) + "</td></tr>";
   h += "<tr><td>suspected</td><td>" + fmt(z.suspected_cases) + "</td></tr>";
@@ -1414,7 +1437,7 @@ showCasesBox.addEventListener("change", function() {
 });
 
 // Default: Suspected cases layer, active-case markers ON, centered on Bunia.
-layerSelect.value = "obs::suspected";
+layerSelect.value = "obs::total";
 showCasesBox.checked = true;
 caseLayer.addTo(map);
 
