@@ -92,7 +92,7 @@ ASOF_FALLBACK = ""
 INSP_FALLBACK_URL = "https://insp.cd/"
 LATEST_SITREP_JSON = SIT_REPS_DIR / "latest_sitrep.json"
 
-PARTNER_ORDER = ["inrb.png", "INSP.jpeg", "INOHA.jpeg", "UMIE.jpeg", "africa-cdc.png"]
+PARTNER_ORDER = ["INSP.png", "inrb.png", "INOHA.jpeg", "UMIE.jpeg", "africa-cdc.png"]
 
 
 # ---------------------------------------------------------------------------
