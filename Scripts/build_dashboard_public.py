@@ -326,11 +326,15 @@ def _extract_matrix_row_sums(csv_path: Path) -> dict[str, float | None]:
     if not csv_path.exists():
         print(f"  WARNING: {csv_path} not found")
         return {}
-    df = pd.read_csv(csv_path, index_col=0)
-    nom_col = df.columns[0]
-    numeric = df.iloc[:, 1:].apply(pd.to_numeric, errors="coerce")
+    df = pd.read_csv(csv_path)
+    if "nom" in df.columns:
+        noms = df["nom"].astype(str)
+        numeric = df.drop(columns=["nom"]).apply(pd.to_numeric, errors="coerce")
+    else:
+        noms = df.iloc[:, 1].astype(str)
+        numeric = df.iloc[:, 2:].apply(pd.to_numeric, errors="coerce")
     sums = numeric.sum(axis=1)
-    return {str(df.iloc[i][nom_col]): _f(sums.iloc[i]) for i in range(len(df))}
+    return {noms.iloc[i]: _f(sums.iloc[i]) for i in range(len(df))}
 
 
 def load_metadata(
