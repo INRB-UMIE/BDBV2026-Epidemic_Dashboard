@@ -271,6 +271,7 @@ def load_metadata() -> tuple[pd.DataFrame, dict[str, dict]]:
         "displaced_in_individuals_12mo", "flowminder_in_mar2026",
         "suspected_cases", "suspected_deaths",
         "confirmed_cases", "confirmed_deaths",
+        "n_pcr_tests_target",
     ]
     for _, row in df.iterrows():
         ref = row["ref_dhis2"]
@@ -643,6 +644,7 @@ LAYER_DEFS = [
     ("Distance from Mongbwalu","d::travel",      "Travel time from Mongbwalu (hours)",              "travel_time_to_mongbwalu_h",                    "plasma_r", "linear"),
     ("Distance from Mongbwalu","d::geo",         "Geodesic distance from Mongbwalu (km)",           "geodesic_to_mongbwalu_km",                      "plasma_r", "linear"),
     ("Distance from Mongbwalu","d::eff",         "Effective distance from Mongbwalu",               "calibration_effective_distance_from_mongbwalu", "plasma_r", "linear"),
+    ("Health system",          "hf::pcr",        "PCR Testing Capacity",                            "n_pcr_tests_target",                             "viridis", "log"),
 ]
 
 # Relative risk layer is masked below this threshold (rendered as "no data").
