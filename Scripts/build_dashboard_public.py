@@ -129,21 +129,37 @@ PARTNER_ORDER = ["INSP.png", "inrb.png", "INOHA.jpeg", "UMIE.jpeg", "africa-cdc.
 # ---------------------------------------------------------------------------
 
 def detect_asof() -> str:
-    """Derive the 'latest case report' date from the newest YYYY-MM-DD sit-rep CSV."""
-    if not SIT_REPS_DIR.exists():
-        return ASOF_FALLBACK
-    dated = []
-    for p in SIT_REPS_DIR.iterdir():
-        if not p.is_file() or p.suffix.lower() != ".csv":
-            continue
-        try:
-            dated.append((datetime.strptime(p.stem, "%Y-%m-%d").date(), p))
-        except ValueError:
-            continue
-    if not dated:
-        return ASOF_FALLBACK
-    d, _ = max(dated)
-    return d.strftime("%d %b %Y").lstrip("0")
+    """Derive the 'latest case report' date.
+    Checks local sit-rep CSVs first, then falls back to _date fields in the
+    build GeoJSON."""
+    if SIT_REPS_DIR.exists():
+        dated = []
+        for p in SIT_REPS_DIR.iterdir():
+            if not p.is_file() or p.suffix.lower() != ".csv":
+                continue
+            try:
+                dated.append((datetime.strptime(p.stem, "%Y-%m-%d").date(), p))
+            except ValueError:
+                continue
+        if dated:
+            d, _ = max(dated)
+            return d.strftime("%d %b %Y").lstrip("0")
+    if BUILD_GEOJSON.exists():
+        with open(BUILD_GEOJSON) as f:
+            raw = json.load(f)
+        dates = set()
+        for feat in raw["features"]:
+            for src in (feat["properties"].get("insp_sitrep", {}),
+                        feat["properties"].get("epi", {})):
+                for v in src.values():
+                    if isinstance(v, dict) and "_date" in v:
+                        try:
+                            dates.add(datetime.strptime(v["_date"], "%Y-%m-%d").date())
+                        except (ValueError, TypeError):
+                            pass
+        if dates:
+            return max(dates).strftime("%d %b %Y").lstrip("0")
+    return ASOF_FALLBACK
 
 
 def latest_insp_url() -> str:
