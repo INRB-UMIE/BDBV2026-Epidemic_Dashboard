@@ -826,7 +826,7 @@ _NON_NUMERIC_STRINGS = {"ND", "NA", ""}
 # Leaf keys that are always excluded (non-numeric identifiers).
 _EXCLUDE_LEAVES = {"poe_names"}
 
-LAYER_CONFIG_YAML = DATA_ROOT / "layer_config.yaml"
+LAYER_CONFIG_YAML = SCRIPT_DIR.parent / "layer_config.yaml"
 
 
 def _load_layer_config() -> dict:
