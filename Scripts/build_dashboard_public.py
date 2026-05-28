@@ -90,7 +90,7 @@ BRANDING_URLS    = BRANDING_DIR / "urls.txt"
 
 SIMPLIFY_TOL = 0.001     # ~110 m at the equator; ~10× fewer vertices than raw
 COORD_DECIMALS = 5
-TRAVEL_FROM_ZONE = "Mongbalu"
+TRAVEL_FROM_ZONE = "Mongbwalu"
 ASOF_FALLBACK = ""
 INSP_FALLBACK_URL = "https://insp.cd/"
 LATEST_SITREP_JSON = SIT_REPS_DIR / "latest_sitrep.json"
@@ -249,7 +249,7 @@ def load_features_from_geojson() -> tuple[list[dict], dict[str, tuple[float, flo
         feats.append({
             "type": "Feature",
             "geometry": gdict,
-            "properties": {"nom": nom, "name": nom},
+            "properties": {"nom": nom, "name": _NOM_TO_NAME.get(nom, nom)},
         })
         centroids[nom] = (float(orig_centroid.x), float(orig_centroid.y))
     return feats, centroids
@@ -594,7 +594,7 @@ def build_active_case_markers(zone_data: dict[str, dict],
         lon, lat = centroids[nom]
         out.append({
             "nom": nom,
-            "name": rec.get("name", nom),
+            "name": _NOM_TO_NAME.get(nom, nom),
             "lat": lat,
             "lon": lon,
             "confirmed": conf,
@@ -980,8 +980,8 @@ EXTRA_LAYER_DEFS = [
     ("Modeled projection",    "cal::true",      "Relative risk",                       "relative_risk",    "viridis", "log", 2),
     ("Incoming Mobility",     "disp::in",       "Incoming displaced persons (12mo)",   "displaced_in_individuals_12mo", "reds", "log", "int"),
     ("Incoming Mobility",     "flow::in",       "Flowminder incoming travel",          "flowminder_in_mar2026",         "reds", "log", "int"),
-    ("Distance from Mongbalu","d::travel",      "Travel time from Mongbalu (hours)",   "travel_time_to_mongbwalu_h",    "plasma_r", "linear", 1),
-    ("Distance from Mongbalu","d::geo",         "Road distance from Mongbalu (km)",    "geodesic_to_mongbwalu_km",      "plasma_r", "linear", "int"),
+    ("Distance from Mongbwalu","d::travel",      "Travel time from Mongbwalu (hours)",   "travel_time_to_mongbwalu_h",    "plasma_r", "linear", 1),
+    ("Distance from Mongbwalu","d::geo",         "Road distance from Mongbwalu (km)",    "geodesic_to_mongbwalu_km",      "plasma_r", "linear", "int"),
 ]
 
 PROJECTION_MASK_LAYERS = {"cal::true"}
@@ -1563,6 +1563,28 @@ function infoHTML(feature) {
   h += "<tr><td>suspected deaths</td><td>" + fmt(z.suspected_deaths) + "</td></tr>";
   h += "</table>";
 
+  h += "<h4>Population</h4>";
+  h += "<table>";
+  h += "<tr><td>pop count</td><td>" + fmt(z.worldpop__pop_count__pop_count) + "</td></tr>";
+  h += "</table>";
+
+  h += "<h4>Health facilities (GRID3)</h4>";
+  h += "<table>";
+  h += "<tr><td>healthsite count</td><td>" + fmt(z.grid3_healthsites__healthsite_count__healthsite_count) + "</td></tr>";
+  h += "</table>";
+
+  h += "<h4>Contact tracing (INSP)</h4>";
+  h += "<table>";
+  h += "<tr><td>contacts traced</td><td>" + fmt(z.insp_sitrep__cumulative_contacts_traced__cumulative_contacts_traced) + "</td></tr>";
+  h += "<tr><td>contacts isolated</td><td>" + fmt(z.insp_sitrep__cumulative_contacts_isolated__cumulative_contacts_isolated) + "</td></tr>";
+  h += "</table>";
+
+  h += "<h4>Testing capacity</h4>";
+  h += "<table>";
+  h += "<tr><td>PCR machines</td><td>" + fmt(z.testing_capacity__pcr_machines__pcr_machines) + "</td></tr>";
+  h += "<tr><td>PCR tests</td><td>" + fmt(z.testing_capacity__pcr_tests__pcr_tests) + "</td></tr>";
+  h += "</table>";
+
   h += "<h4>Modeled projection</h4>";
   h += "<table>";
   h += "<tr><td>relative risk</td><td>" + fmt(z.relative_risk, "rel") + "</td></tr>";
@@ -1696,7 +1718,7 @@ wireModal("terms-modal", "terms-btn", "terms-close");
 
 // Pre-populate the zone info panel with Mongbwalu.
 (function preloadMongbwalu() {
-  const target = (TRAVEL_FROM || "Mongbalu").toLowerCase();
+  const target = (TRAVEL_FROM || "Mongbwalu").toLowerCase();
   for (const feat of PAYLOAD.geometry.features) {
     if ((feat.properties.name || "").toLowerCase() === target) {
       document.getElementById("info-body").className = "";
