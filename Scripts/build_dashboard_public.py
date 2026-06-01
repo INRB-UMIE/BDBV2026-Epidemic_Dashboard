@@ -131,6 +131,55 @@ PARTNER_ORDER = ["INSP.png", "inrb.png", "INOHA.jpeg", "UMIE.jpeg", "africa-cdc.
 # helpers
 # ---------------------------------------------------------------------------
 
+def _parse_sitrep_date(value) -> datetime.date | None:
+    """Parse INSP sitrep ``_date`` strings from build GeoJSON.
+
+    Supports ISO (``2026-05-28``), day-first (``28/05/2026``), and month-first
+    short US-style (``5/28/26``) as used in the data pipeline.
+    """
+    if value is None:
+        return None
+    s = str(value).strip()
+    if not s:
+        return None
+    if len(s) >= 10 and s[4:5] == "-" and s[7:8] == "-":
+        try:
+            return datetime.strptime(s[:10], "%Y-%m-%d").date()
+        except ValueError:
+            pass
+    if "/" not in s:
+        return None
+    parts = s.split("/")
+    if len(parts) != 3:
+        return None
+    try:
+        a, b, y = int(parts[0]), int(parts[1]), int(parts[2])
+    except ValueError:
+        return None
+    year = y + 2000 if y < 100 else y
+    if a > 12:
+        try:
+            return datetime(year, b, a).date()
+        except ValueError:
+            return None
+    if b > 12:
+        try:
+            return datetime(year, a, b).date()
+        except ValueError:
+            return None
+    # Ambiguous d/m vs m/d: prefer day-first (INSP DRC convention).
+    for month, day in ((b, a), (a, b)):
+        try:
+            return datetime(year, month, day).date()
+        except ValueError:
+            continue
+    return None
+
+
+def _format_asof(d: datetime.date) -> str:
+    return d.strftime("%d %b %Y").lstrip("0")
+
+
 def detect_asof() -> str:
     """Derive the 'latest case report' date.
     Checks local sit-rep CSVs first, then falls back to _date fields in the
@@ -146,22 +195,20 @@ def detect_asof() -> str:
                 continue
         if dated:
             d, _ = max(dated)
-            return d.strftime("%d %b %Y").lstrip("0")
+            return _format_asof(d)
     if BUILD_GEOJSON.exists():
         with open(BUILD_GEOJSON) as f:
             raw = json.load(f)
         dates = set()
         for feat in raw["features"]:
-            for src in (feat["properties"].get("insp_sitrep", {}),
-                        feat["properties"].get("epi", {})):
-                for v in src.values():
-                    if isinstance(v, dict) and "_date" in v:
-                        try:
-                            dates.add(datetime.strptime(v["_date"], "%Y-%m-%d").date())
-                        except (ValueError, TypeError):
-                            pass
+            insp = feat["properties"].get("insp_sitrep") or {}
+            for v in insp.values():
+                if isinstance(v, dict) and "_date" in v:
+                    parsed = _parse_sitrep_date(v["_date"])
+                    if parsed is not None:
+                        dates.add(parsed)
         if dates:
-            return max(dates).strftime("%d %b %Y").lstrip("0")
+            return _format_asof(max(dates))
     return ASOF_FALLBACK
 
 
