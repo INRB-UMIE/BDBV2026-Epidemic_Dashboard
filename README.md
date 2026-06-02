@@ -114,6 +114,7 @@ Workflow [`.github/workflows/build-dashboard.yml`](.github/workflows/build-dashb
 
 - **Push to `main`** (any file except `index.html` / `output/**`) — rebuild with latest data release + latest linelist plots.
 - **Data release** — `release.yml` on the data repo dispatches after a successful release; uses that release commit.
+- **Linelist plot update** — pushing `dashboard_plots/*.svg` or `manifest.json` to linelist `main` dispatches a rebuild (latest data release + that linelist commit).
 - **Manual** — Actions → *Build dashboard* → optional `data_repo_ref` (empty = latest release) and `linelist_repo_ref` (default `main`).
 
 Commits `output/dashboard.html` and `index.html` back to **`main`**.

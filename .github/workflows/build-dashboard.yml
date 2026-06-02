@@ -1,6 +1,6 @@
 # Build output/dashboard.html and sync index.html for GitHub Pages.
-# Triggered on dashboard pushes to main, via repository_dispatch from BDBV2026-Data,
-# or manually.
+# Triggered on dashboard pushes to main, via repository_dispatch from BDBV2026-Data or
+# BDBV2026-Linelist_Processing, or manually.
 
 name: Build dashboard
 
@@ -22,7 +22,7 @@ on:
         required: false
         default: "main"
   repository_dispatch:
-    types: [data-updated]
+    types: [data-updated, linelist-updated]
 
 permissions:
   contents: write
@@ -64,14 +64,23 @@ jobs:
           DATA_SOURCE="latest-release"
 
           if [ "${{ github.event_name }}" = "repository_dispatch" ]; then
-            DATA_SOURCE="dispatch"
             if [ -n "${{ github.event.client_payload.dashboard_branch }}" ]; then
               DASH_REF="${{ github.event.client_payload.dashboard_branch }}"
             fi
-            if [ -n "${{ github.event.client_payload.data_ref }}" ]; then
-              DATA_REF="${{ github.event.client_payload.data_ref }}"
-            elif [ -n "${{ github.event.client_payload.sha }}" ]; then
-              DATA_REF="${{ github.event.client_payload.sha }}"
+            if [ "${{ github.event.action }}" = "data-updated" ]; then
+              DATA_SOURCE="data-dispatch"
+              if [ -n "${{ github.event.client_payload.data_ref }}" ]; then
+                DATA_REF="${{ github.event.client_payload.data_ref }}"
+              elif [ -n "${{ github.event.client_payload.sha }}" ]; then
+                DATA_REF="${{ github.event.client_payload.sha }}"
+              fi
+            elif [ "${{ github.event.action }}" = "linelist-updated" ]; then
+              DATA_SOURCE="linelist-dispatch"
+              if [ -n "${{ github.event.client_payload.linelist_ref }}" ]; then
+                LINELIST_REF="${{ github.event.client_payload.linelist_ref }}"
+              elif [ -n "${{ github.event.client_payload.sha }}" ]; then
+                LINELIST_REF="${{ github.event.client_payload.sha }}"
+              fi
             fi
           elif [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
             DATA_SOURCE="manual"
