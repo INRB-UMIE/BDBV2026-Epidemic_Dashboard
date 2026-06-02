@@ -106,7 +106,7 @@ Workflow [`.github/workflows/build-dashboard.yml`](.github/workflows/build-dashb
 
 **Run manually:** Actions → *Build dashboard* → *Run workflow* (on `main`) → optional `data_repo_ref` (default `main`).
 
-**Triggered from the data repo:** after a successful release on `main`, or via [`trigger-dashboard-rebuild`](https://github.com/INRB-UMIE/BDBV2026-Data/blob/main/.github/workflows/trigger-dashboard-rebuild.yml) on the data repo.
+**Triggered from the data repo:** automatically after a successful [release](https://github.com/INRB-UMIE/BDBV2026-Data/blob/main/.github/workflows/release.yml) on `main`. Manual escape hatch: *Trigger dashboard rebuild* on the data repo.
 
 **Secret (data repo only):** add `DASHBOARD_DISPATCH_TOKEN` — a fine-grained PAT with **contents: write** on `BDBV2026-Epidemic_Dashboard`. Without it, dispatch steps warn and skip (local/manual builds still work).
 
