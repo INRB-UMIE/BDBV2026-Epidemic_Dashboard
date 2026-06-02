@@ -1,0 +1,32 @@
+{
+  "source_csv": "data/processed/for_dashboard_plotting.csv",
+  "series": [
+    {
+      "id": "d_pos",
+      "label": "Confirmed",
+      "color": "#D55E00"
+    },
+    {
+      "id": "d_neg",
+      "label": "Negative",
+      "color": "#0072B2"
+    },
+    {
+      "id": "d_inv",
+      "label": "Under investigation",
+      "color": "#E69F00"
+    },
+    {
+      "id": "d_blk",
+      "label": "Unclassified",
+      "color": "#999999"
+    }
+  ],
+  "plots": {
+    "Ituri": {
+      "file": "daily_onset_ituri.svg",
+      "title": "Daily onset \u2014 Ituri",
+      "caption": "Cases by date of symptom onset"
+    }
+  }
+}

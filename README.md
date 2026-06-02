@@ -9,6 +9,7 @@ This work is led by the Institut National de Santé Publique (INSP) (Pierre Akil
 - **health_zone_metadata.csv** Metadata file for dashboard, see below. 
 - **ic_model_estimates.csv** (optional) Imperial College model date and case bounds for the tracker tooltip (`PAYLOAD.ic_model`; independent of INSP sitreps).
 - **caveats.csv** (optional) Per-metric warnings in the title-panel tracker: `metric` (`confirmed_cases`, `suspected_cases`, `confirmed_deaths`, `suspected_deaths`) and `warning` text; adds a mark beside the count and a footnote below.
+- **dashboard_plots/** (optional) Pre-built province SVG charts for the Trends tab (`manifest.json` + `daily_onset_*.svg`). Copy from [EBOV2026_Linelist_Processing](https://github.com/INRB-UMIE/EBOV2026_Linelist_Processing) after running `src/3-dashboard_plots/build_onset_plots.py`.
 - **Methods** Methods for dashboard, see below.
 - **ToS** ToS for dashboard, see below. 
 
@@ -23,6 +24,7 @@ EBOV2026_Epidemic_Dashboard/
 │   ├── health_zone_metadata.csv    # fallback fields (relative risk, population bounds, etc.)
 │   ├── ic_model_estimates.csv      # optional Imperial College bounds for tracker tooltip
 │   ├── caveats.csv                 # optional tracker footnotes (metric + warning)
+│   ├── dashboard_plots/            # optional Trends-tab SVGs (manifest.json + *.svg)
 │   ├── Methods/Contributors_Methods_Data_website.docx
 │   ├── ToS/Terms of Use.txt
 │   └── Branding/                   # partner logos + urls.txt

@@ -59,6 +59,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 from shapely.geometry import mapping, shape
+from shapely.ops import unary_union
 from shapely.validation import make_valid
 
 
@@ -80,6 +81,7 @@ EXTERNAL_DATA    = BUILD_DIR.parent / "data"
 METADATA_CSV     = DATA_ROOT / "health_zone_metadata.csv"
 IC_MODEL_CSV     = DATA_ROOT / "ic_model_estimates.csv"
 CAVEATS_CSV      = DATA_ROOT / "caveats.csv"
+DASHBOARD_PLOTS_DIR = DATA_ROOT / "dashboard_plots"
 SIT_REPS_DIR     = DATA_ROOT / "Epidemiological Data"
 METHODS_DOCX     = DATA_ROOT / "Methods" / "Contributors_Methods_Data_website.docx"
 TERMS_TXT        = DATA_ROOT / "ToS" / "Terms of Use.txt"
@@ -295,13 +297,55 @@ def load_features_from_geojson() -> tuple[list[dict], dict[str, tuple[float, flo
         gdict = mapping(geom)
         if COORD_DECIMALS is not None:
             gdict = _round_coords(gdict, COORD_DECIMALS)
+        province = feat["properties"].get("province")
+        props = {"nom": nom, "name": _NOM_TO_NAME.get(nom, nom)}
+        if province:
+            props["province"] = province
         feats.append({
             "type": "Feature",
             "geometry": gdict,
-            "properties": {"nom": nom, "name": _NOM_TO_NAME.get(nom, nom)},
+            "properties": props,
         })
         centroids[nom] = (float(orig_centroid.x), float(orig_centroid.y))
     return feats, centroids
+
+
+def build_province_boundaries() -> dict:
+    """Union health-zone polygons into one outline per province."""
+    if not BUILD_GEOJSON.exists():
+        return {"type": "FeatureCollection", "features": []}
+
+    with open(BUILD_GEOJSON) as f:
+        raw = json.load(f)
+
+    by_province: dict[str, list] = {}
+    for feat in raw.get("features") or []:
+        prov = (feat.get("properties") or {}).get("province")
+        if not prov:
+            continue
+        geom = make_valid(shape(feat["geometry"]))
+        if geom.is_empty or geom.geom_type not in {"Polygon", "MultiPolygon"}:
+            continue
+        by_province.setdefault(prov, []).append(geom)
+
+    out: list[dict] = []
+    for prov in sorted(by_province):
+        merged = unary_union(by_province[prov])
+        if merged.is_empty:
+            continue
+        if SIMPLIFY_TOL > 0:
+            merged = merged.simplify(SIMPLIFY_TOL, preserve_topology=True)
+        if merged.is_empty:
+            continue
+        gdict = mapping(merged)
+        if COORD_DECIMALS is not None:
+            gdict = _round_coords(gdict, COORD_DECIMALS)
+        out.append({
+            "type": "Feature",
+            "geometry": gdict,
+            "properties": {"province": prov},
+        })
+    return {"type": "FeatureCollection", "features": out}
 
 
 def _load_build_geojson_properties() -> dict[str, dict]:
@@ -553,6 +597,47 @@ def load_ic_model_estimates(country: str = "DRC") -> dict:
     print(f"  ic_model: date={out['ic_model_date']!r}, "
           f"bounds={out['ic_model_lowerbound']!r}–{out['ic_model_upperbound']!r}")
     return out
+
+
+# Pre-built province plots for the Trends panel (from EBOV2026_Linelist_Processing).
+def load_dashboard_plots() -> dict | None:
+    """Load dashboard_plots/manifest.json and embed SVG content by province."""
+    manifest_path = DASHBOARD_PLOTS_DIR / "manifest.json"
+    if not manifest_path.exists():
+        print(f"  NOTE: {manifest_path} not found; trends plots unavailable")
+        return None
+
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    plots: dict[str, dict] = {}
+    for province, meta in (manifest.get("plots") or {}).items():
+        if not isinstance(meta, dict):
+            continue
+        filename = meta.get("file")
+        if not filename:
+            continue
+        svg_path = DASHBOARD_PLOTS_DIR / filename
+        if not svg_path.exists():
+            print(f"  WARNING: missing plot SVG for {province!r}: {svg_path.name}")
+            continue
+        svg = svg_path.read_text(encoding="utf-8").strip()
+        if svg.startswith("<?xml"):
+            svg = svg.split("?>", 1)[-1].strip()
+        plots[province] = {
+            "file": filename,
+            "title": meta.get("title") or f"Daily onset — {province}",
+            "caption": meta.get("caption") or "",
+            "svg": svg,
+        }
+
+    if not plots:
+        print(f"  WARNING: {manifest_path.name} listed no loadable plots")
+        return None
+
+    print(f"  dashboard plots: {len(plots)} province(s) from {DASHBOARD_PLOTS_DIR.name}/")
+    return {
+        "series": manifest.get("series") or [],
+        "plots": plots,
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -1285,6 +1370,11 @@ def build_payload() -> dict:
     active_case_markers = build_active_case_markers(zone_data, centroids_by_nom)
     print(f"  active-case markers: {len(active_case_markers)} zones")
 
+    province_boundaries = build_province_boundaries()
+    print(f"  province boundaries: {len(province_boundaries['features'])} provinces")
+
+    onset_trends = load_dashboard_plots()
+
     asof = detect_asof()
     print(f"  asof: {asof}")
 
@@ -1309,6 +1399,8 @@ def build_payload() -> dict:
         "ic_model": ic_model,
         "tracker_caveats": tracker_caveats,
         "active_case_markers": active_case_markers,
+        "province_boundaries": province_boundaries,
+        "onset_trends": onset_trends,
     }
 
 
@@ -1336,6 +1428,67 @@ HTML_TEMPLATE = r"""<!doctype html>
   #controls     { top:12px; left:12px; max-width:340px; }
   #legend       { bottom:24px; left:12px; max-width:300px; }
   #info         { top:12px; right:12px; max-width:340px; max-height:80vh; overflow-y:auto; }
+  #trends       {
+    top:auto; right:8px;
+    bottom:calc(12px + clamp(28px, 5vmin, 48px) + 10px);
+    width:min(480px, calc(100vw - 16px));
+    max-width:min(480px, calc(100vw - 16px));
+    max-height:min(78vh, calc(100vh - 200px));
+    overflow-y:auto; display:none;
+    box-sizing:border-box;
+  }
+  body.view-trends #controls,
+  body.view-trends #legend,
+  body.view-trends #info { display:none !important; }
+  body.view-trends #trends { display:block; }
+  body.view-trends.trends-province-hovered #trends {
+    width:min(480px, calc(100vw - 16px));
+    max-width:min(480px, calc(100vw - 16px));
+  }
+  #view-switcher {
+    position:absolute; bottom:12px; left:50%; transform:translateX(-50%);
+    z-index:1000;
+    background:rgba(20,20,20,0.92); color:#f4f4f4;
+    padding:8px 12px; border-radius:8px;
+    box-shadow:0 2px 10px rgba(0,0,0,0.4);
+  }
+  .view-tabs { display:flex; justify-content:center; gap:6px; }
+  .view-tab {
+    background:#222; color:#ccc; border:1px solid #555; border-radius:4px;
+    padding:4px 14px; font-size:12px; cursor:pointer; line-height:1.3;
+  }
+  .view-tab:hover { background:#333; color:#eee; }
+  .view-tab.active { color:#ffd28a; border-color:#ffae42; background:#2a2418; }
+  #trends-hint {
+    position:absolute; z-index:900;
+    top:50%; left:50%; transform:translate(-50%, -50%);
+    pointer-events:none; color:#aaa;
+    font-size:clamp(14px, 2.5vw, 18px);
+    text-align:center; padding:14px 22px;
+    display:none; align-items:center; justify-content:center;
+    background:rgba(20,20,20,0.82);
+    border-radius:14px;
+    box-shadow:0 2px 10px rgba(0,0,0,0.35);
+    max-width:min(420px, calc(100vw - 48px));
+    line-height:1.4;
+  }
+  body.view-trends #trends-hint { display:flex; }
+  body.view-trends.trends-province-hovered #trends-hint { display:none; }
+  #trends-body.trends-empty { color:#888; font-size:12px; }
+  .onset-chart-wrap { width:100%; margin-top:4px; }
+  .onset-chart-wrap svg { width:100%; max-width:100%; height:auto; display:block; }
+  @media (min-width: 1024px) {
+    body.view-trends.trends-province-hovered #trends {
+      width:min(720px, calc(100vw - 24px));
+      max-width:min(720px, calc(100vw - 24px));
+    }
+  }
+  @media (min-width: 1400px) {
+    body.view-trends.trends-province-hovered #trends {
+      width:min(760px, calc(100vw - 24px));
+      max-width:min(760px, calc(100vw - 24px));
+    }
+  }
   #info-header,
   .panel-header { display:flex; align-items:center; justify-content:space-between; gap:8px; }
   #info-toggle,
@@ -1355,6 +1508,9 @@ HTML_TEMPLATE = r"""<!doctype html>
     #tracker .countries-row { gap:2px; margin-top:6px; }
     #tracker .country { gap:3px 6px; }
     #info           { max-width:60vw; }
+    #trends         { width:min(520px, calc(100vw - 12px)); max-width:min(520px, calc(100vw - 12px));
+                      right:6px;
+                      bottom:calc(8px + clamp(40px, 12vw, 72px) + 8px); }
     #legend         { max-width:60vw; }
     #controls       { top:clamp(150px, 28vh, 240px); }
     #info           { top:clamp(150px, 28vh, 240px); }
@@ -1372,7 +1528,8 @@ HTML_TEMPLATE = r"""<!doctype html>
     #tracker .global-cell .sub { font-size:9px; margin-top:0; }
     #tracker .countries-row { margin-top:3px; font-size:10px; gap:1px; }
     #info           { max-height:70vh; }
-    #legend         { max-height:60vh; bottom:8px; }
+    #legend         { max-height:60vh; bottom:56px; }
+    #trends         { max-height:min(55vh, calc(100vh - 180px)); }
     #partners      { bottom:8px; right:6px; padding:2px 3px; gap:2px;
                       width:auto; max-width:min(38vw, 260px); }
     #partners a    { flex:0 0 calc(50% - 1px); }
@@ -1528,8 +1685,9 @@ HTML_TEMPLATE = r"""<!doctype html>
                   max-width:min(22vmin, 140px); display:block; object-fit:contain; }
 </style>
 </head>
-<body>
+<body class="view-map">
 <div id="map"></div>
+<div id="trends-hint">Hover over a province to see trends</div>
 <div id="partners"></div>
 <div id="title" class="panel">
   <h1>DRC Ebola Bundibugyo 2026</h1>
@@ -1595,6 +1753,19 @@ HTML_TEMPLATE = r"""<!doctype html>
     <button id="info-toggle" type="button" aria-label="Toggle zone details" title="Collapse / expand zone details">−</button>
   </div>
   <div id="info-body" class="info-empty">Hover a health zone.</div>
+</div>
+<div id="view-switcher">
+  <div id="view-tabs" class="view-tabs">
+    <button type="button" class="view-tab active" data-view="map">Current snapshot</button>
+    <button type="button" class="view-tab" data-view="trends">Trends</button>
+  </div>
+</div>
+<div id="trends" class="panel">
+  <div class="panel-header">
+    <strong id="trends-title">Trends</strong>
+    <button class="panel-toggle" data-target="trends" type="button" aria-label="Toggle trends panel" title="Collapse / expand trends">−</button>
+  </div>
+  <div id="trends-body" class="panel-body trends-empty"></div>
 </div>
 
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
@@ -1948,16 +2119,146 @@ const geoLayer = L.geoJSON(PAYLOAD.geometry, {
   onEachFeature: function (feature, layer) {
     layer.on({
       mouseover: function(e) {
+        if (activeView === "trends") {
+          clearTimeout(trendsHoverTimer);
+          setTrendsProvinceHover(feature.properties.province || null);
+          return;
+        }
         e.target.setStyle({weight: 1.6, color: "#ffae42"});
         e.target.bringToFront();
         document.getElementById("info-body").className = "";
         document.getElementById("info-body").innerHTML = infoHTML(feature);
       },
-      mouseout: function(e) { geoLayer.resetStyle(e.target); },
+      mouseout: function(e) {
+        if (activeView === "trends") {
+          trendsHoverTimer = setTimeout(function() {
+            setTrendsProvinceHover(null);
+          }, 40);
+          return;
+        }
+        geoLayer.resetStyle(e.target);
+      },
       click: function(e) { map.fitBounds(e.target.getBounds(), {padding:[40,40]}); }
     });
   }
 }).addTo(map);
+
+// --- province outlines (Trends view) ---
+map.createPane("province-outline");
+map.getPane("province-outline").style.zIndex = 550;
+const provinceOutlineLayer = L.geoJSON(PAYLOAD.province_boundaries || {type:"FeatureCollection", features:[]}, {
+  pane: "province-outline",
+  interactive: false,
+  style: function() {
+    return {
+      color: "#ffd28a",
+      weight: 2.5,
+      opacity: 0.95,
+      fillOpacity: 0,
+    };
+  },
+});
+
+function applyProvinceOutlineStyles(hoveredProvince) {
+  trendsHoveredProvince = hoveredProvince || null;
+  document.body.classList.toggle("trends-province-hovered", !!trendsHoveredProvince);
+  provinceOutlineLayer.eachLayer(function(layer) {
+    const match = trendsHoveredProvince &&
+      layer.feature.properties.province === trendsHoveredProvince;
+    layer.setStyle({
+      color: match ? "#ffae42" : "#ffd28a",
+      weight: match ? 3 : 2.5,
+      opacity: 1,
+      fillOpacity: 0,
+    });
+    if (match) layer.bringToFront();
+  });
+  renderTrendsPanel(trendsHoveredProvince);
+}
+
+function escHtml(s) {
+  return String(s)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
+
+function renderTrendsPanel(province) {
+  const body = document.getElementById("trends-body");
+  const title = document.getElementById("trends-title");
+  if (!body) return;
+  if (!province) {
+    if (title) title.textContent = "Trends";
+    body.className = "panel-body trends-empty";
+    body.innerHTML = "";
+    return;
+  }
+  const trends = PAYLOAD.onset_trends;
+  const plot = trends && trends.plots && trends.plots[province];
+  if (!plot || !plot.svg) {
+    if (title) title.textContent = "Trends";
+    body.className = "panel-body trends-empty";
+    body.innerHTML = "<p>No daily onset data for " + escHtml(province) + ".</p>";
+    return;
+  }
+  if (title) title.textContent = plot.title || ("Daily onset — " + province);
+  body.className = "panel-body";
+  body.innerHTML = "<div class='onset-chart-wrap'>" + plot.svg + "</div>";
+}
+
+function setTrendsProvinceHover(province) {
+  applyProvinceOutlineStyles(province || null);
+}
+
+function showProvinceOutlines() {
+  if (!map.hasLayer(provinceOutlineLayer)) {
+    provinceOutlineLayer.addTo(map);
+  }
+  provinceOutlineLayer.bringToFront();
+  applyProvinceOutlineStyles(null);
+}
+
+function hideProvinceOutlines() {
+  if (map.hasLayer(provinceOutlineLayer)) {
+    map.removeLayer(provinceOutlineLayer);
+  }
+  applyProvinceOutlineStyles(null);
+}
+
+// --- Map / Trends tab switching ---
+let activeView = "map";
+let trendsHoverTimer = null;
+let trendsHoveredProvince = null;
+let savedMapLayerId = null;
+
+function setActiveView(view) {
+  if (view === activeView) return;
+  if (view === "trends") {
+    savedMapLayerId = layerSelect.value;
+    layerSelect.value = "obs::total";
+    recompute();
+    showProvinceOutlines();
+  } else {
+    hideProvinceOutlines();
+    if (savedMapLayerId) {
+      layerSelect.value = savedMapLayerId;
+      recompute();
+    }
+  }
+  activeView = view;
+  document.body.classList.toggle("view-map", view === "map");
+  document.body.classList.toggle("view-trends", view === "trends");
+  document.querySelectorAll(".view-tab").forEach(function(btn) {
+    btn.classList.toggle("active", btn.dataset.view === view);
+  });
+}
+
+document.querySelectorAll(".view-tab").forEach(function(btn) {
+  btn.addEventListener("click", function() {
+    setActiveView(btn.dataset.view || "map");
+  });
+});
 
 // --- active-case markers ---
 const ACTIVE_CASES = PAYLOAD.active_case_markers || [];
