@@ -102,11 +102,9 @@ cp output/dashboard.html index.html
 
 ## Automated rebuild (GitHub Actions)
 
-Workflow [`.github/workflows/build-dashboard.yml`](.github/workflows/build-dashboard.yml) checks out this repo and [`BDBV2026-Data`](https://github.com/INRB-UMIE/BDBV2026-Data), runs the build, and commits `output/dashboard.html` and `index.html` back to the branch that triggered the run.
+Workflow [`.github/workflows/build-dashboard.yml`](.github/workflows/build-dashboard.yml) checks out this repo and [`BDBV2026-Data`](https://github.com/INRB-UMIE/BDBV2026-Data) on **`main`**, runs the build, and commits `output/dashboard.html` and `index.html` back to **`main`**.
 
-**Test branch:** `automate_dashboard_deployment` (also `main` for production).
-
-**Run manually:** Actions → *Build dashboard* → *Run workflow* → set `data_repo_ref` (default `main`).
+**Run manually:** Actions → *Build dashboard* → *Run workflow* (on `main`) → optional `data_repo_ref` (default `main`).
 
 **Triggered from the data repo:** after a successful release on `main`, or via [`trigger-dashboard-rebuild`](https://github.com/INRB-UMIE/BDBV2026-Data/blob/main/.github/workflows/trigger-dashboard-rebuild.yml) on the data repo.
 

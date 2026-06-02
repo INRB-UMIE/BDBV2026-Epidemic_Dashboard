@@ -7,7 +7,6 @@ on:
   push:
     branches:
       - main
-      - automate_dashboard_deployment
     paths:
       - "Scripts/**"
       - "Data/**"
