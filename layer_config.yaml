@@ -27,7 +27,7 @@ exclude:
 groups:
   epi:
     label: "Observed (WHO)"
-    palette: reds
+    palette: outbreak
     scale: log
     legend_round: int
   insp_sitrep:

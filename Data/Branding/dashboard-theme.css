@@ -1,0 +1,288 @@
+/*
+ * BDBV epidemic dashboard — theme layer
+ * Phase A: design tokens + Leaflet chrome
+ * Phase B: page, panels, tracker, controls (mapped to existing dashboard IDs)
+ */
+
+:root {
+  --bg: #f6f5f2;
+  --card: #ffffff;
+  --border: #e7e3db;
+  --ink: #2a2a27;
+  --muted: #9c968b;
+  --maroon: #7c1d1d;
+  --red: #b23b2e;
+  --terracotta: #9b7d4e;
+  --salmon: #f1ccc6;
+  --grip: #d8d3c9;
+  --link: #7c4a12;
+  --link-hover: var(--maroon);
+  --province-outline: #9b7d4e;
+  --province-outline-hover: #b23b2e;
+  --province-outline-weight: 1;
+  --province-outline-weight-hover: 1.5;
+  --case-marker: #5b86b3;
+  --case-marker-opacity: 0.85;
+}
+
+/* ── Page ─────────────────────────────────────────────────── */
+html, body {
+  background: var(--bg) !important;
+  color: var(--ink) !important;
+  font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* ── Floating panels ──────────────────────────────────────── */
+.panel {
+  background: var(--card) !important;
+  color: var(--ink) !important;
+  border: 1px solid var(--border) !important;
+  box-shadow: 0 1px 3px rgba(30, 25, 18, 0.08) !important;
+}
+
+.panel-header strong,
+#info-header strong,
+#legend-title strong,
+#trends-title {
+  color: var(--ink);
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+}
+
+#info-toggle,
+.panel-toggle {
+  color: var(--terracotta) !important;
+  border-color: var(--border) !important;
+  background: transparent !important;
+}
+#info-toggle:hover,
+.panel-toggle:hover {
+  color: var(--maroon) !important;
+  border-color: var(--terracotta) !important;
+  background: rgba(155, 125, 78, 0.08) !important;
+}
+
+/* ── Title + tracker ────────────────────────────────────── */
+#title h1 {
+  color: var(--ink) !important;
+  letter-spacing: -0.01em;
+}
+#title .sub {
+  color: var(--muted) !important;
+}
+#title a {
+  color: var(--link) !important;
+}
+#title a:hover {
+  color: var(--link-hover) !important;
+}
+
+#tracker {
+  border-top-color: var(--border) !important;
+}
+#tracker .global-title,
+#tracker .global-cell .sub,
+#tracker .country .sub {
+  color: var(--muted) !important;
+}
+#tracker .global-cell.cases .num {
+  color: var(--terracotta) !important;
+}
+#tracker .global-cell.deaths .num {
+  color: var(--maroon) !important;
+}
+#tracker .countries-row {
+  color: var(--ink) !important;
+}
+#tracker .country .name {
+  color: var(--link) !important;
+}
+#tracker .country .conf {
+  color: var(--red) !important;
+}
+#tracker .country .susp {
+  color: var(--terracotta) !important;
+}
+#tracker .country .conf-d {
+  color: var(--maroon) !important;
+}
+#tracker .country .susp-d {
+  color: #a66b55 !important;
+}
+#tracker .country .dot {
+  color: var(--border) !important;
+}
+#tracker .caveat-mark,
+#tracker .tracker-footnotes .mark {
+  color: var(--terracotta) !important;
+}
+#tracker .tracker-footnotes {
+  color: var(--muted) !important;
+}
+
+#imperial-model-estimates {
+  color: var(--muted) !important;
+}
+#imperial-model-estimates .info-icon {
+  border-color: var(--border) !important;
+  background: var(--card) !important;
+  color: var(--terracotta) !important;
+}
+#imperial-model-estimates .info-icon:hover,
+#imperial-model-estimates .info-icon:focus-visible {
+  border-color: var(--terracotta) !important;
+  color: var(--maroon) !important;
+}
+#imperial-model-estimates .info-tooltip {
+  background: var(--card) !important;
+  border-color: var(--border) !important;
+  color: var(--ink) !important;
+  box-shadow: 0 4px 16px rgba(30, 25, 18, 0.12) !important;
+}
+#imperial-model-estimates .info-tooltip a {
+  color: var(--link) !important;
+}
+
+/* ── Controls + legend ──────────────────────────────────── */
+label {
+  color: var(--muted) !important;
+}
+select, button {
+  background: var(--card) !important;
+  color: var(--ink) !important;
+  border-color: var(--border) !important;
+}
+.checkbox-row label {
+  color: var(--ink) !important;
+}
+.footer,
+.legend-scale,
+.legend-ticks,
+#legend-gray {
+  color: var(--muted) !important;
+}
+.info-empty {
+  color: var(--muted) !important;
+}
+table td:first-child {
+  color: var(--muted) !important;
+}
+h4 {
+  color: var(--terracotta) !important;
+}
+
+.link-btn {
+  background: var(--card) !important;
+  color: var(--terracotta) !important;
+  border-color: var(--border) !important;
+}
+.link-btn:hover {
+  background: rgba(155, 125, 78, 0.08) !important;
+  color: var(--maroon) !important;
+  border-color: var(--terracotta) !important;
+}
+
+/* ── View switcher + trends ─────────────────────────────── */
+#view-switcher {
+  background: var(--card) !important;
+  border: 1px solid var(--border) !important;
+  box-shadow: 0 1px 3px rgba(30, 25, 18, 0.08) !important;
+}
+.view-tab {
+  background: var(--card) !important;
+  color: var(--muted) !important;
+  border-color: var(--border) !important;
+}
+.view-tab:hover {
+  background: rgba(155, 125, 78, 0.08) !important;
+  color: var(--ink) !important;
+}
+.view-tab.active {
+  color: var(--terracotta) !important;
+  border-color: var(--terracotta) !important;
+  background: rgba(155, 125, 78, 0.12) !important;
+}
+
+#trends-hint {
+  background: rgba(255, 255, 255, 0.92) !important;
+  color: var(--muted) !important;
+  border: 1px solid var(--border);
+  box-shadow: 0 1px 3px rgba(30, 25, 18, 0.08) !important;
+}
+#trends-body.trends-empty {
+  color: var(--muted) !important;
+}
+
+/* ── Modals ─────────────────────────────────────────────── */
+.modal .sheet {
+  background: var(--card) !important;
+  color: var(--ink) !important;
+  box-shadow: 0 8px 32px rgba(30, 25, 18, 0.15) !important;
+}
+.modal h2, .modal h3, .modal h4 {
+  color: var(--terracotta) !important;
+}
+.modal .close {
+  color: var(--muted) !important;
+}
+.modal .close:hover {
+  color: var(--maroon) !important;
+}
+.modal a {
+  color: var(--link) !important;
+}
+.modal a:hover {
+  color: var(--link-hover) !important;
+}
+.modal .methods-table th {
+  background: #f3f1ec !important;
+  color: var(--terracotta) !important;
+  border-color: var(--border) !important;
+}
+.modal .methods-table td {
+  border-color: var(--border) !important;
+}
+.modal .methods-table tr:nth-child(even) td {
+  background: #faf9f7 !important;
+}
+
+#partners {
+  background: var(--card) !important;
+  border: 1px solid var(--border) !important;
+  box-shadow: 0 1px 3px rgba(30, 25, 18, 0.08) !important;
+}
+
+/* ── Active-case markers ──────────────────────────────────── */
+.case-icon {
+  background: rgba(91, 134, 179, var(--case-marker-opacity)) !important;
+  border: 1.5px solid #fff !important;
+  box-shadow: 0 0 6px rgba(91, 134, 179, 0.45) !important;
+}
+
+/* ── Leaflet chrome ───────────────────────────────────────── */
+.leaflet-control-zoom a {
+  background: var(--card) !important;
+  color: var(--ink) !important;
+  border-color: var(--border) !important;
+}
+.leaflet-control-zoom a:hover {
+  background: rgba(155, 125, 78, 0.08) !important;
+  color: var(--maroon) !important;
+}
+.leaflet-bar {
+  box-shadow: 0 1px 2px rgba(30, 25, 18, 0.1) !important;
+  border-color: var(--border) !important;
+}
+.leaflet-control-attribution {
+  font-size: 9px !important;
+  color: var(--muted) !important;
+  background: rgba(255, 255, 255, 0.85) !important;
+}
+.leaflet-container .leaflet-interactive:focus,
+.leaflet-container svg:focus,
+.leaflet-container path:focus {
+  outline: none;
+}

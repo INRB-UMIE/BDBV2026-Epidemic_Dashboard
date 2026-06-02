@@ -87,6 +87,7 @@ METHODS_DOCX     = DATA_ROOT / "Methods" / "Contributors_Methods_Data_website.do
 TERMS_TXT        = DATA_ROOT / "ToS" / "Terms of Use.txt"
 BRANDING_DIR     = DATA_ROOT / "Branding"
 BRANDING_URLS    = BRANDING_DIR / "urls.txt"
+THEME_CSS        = BRANDING_DIR / "dashboard-theme.css"
 
 
 # ---------------------------------------------------------------------------
@@ -1287,7 +1288,7 @@ EXTRA_LAYER_DEFS = [
     ("Observed (epi update)", "obs::suspected", "Suspected cases",                     "suspected_cases",  "reds", "log", "int"),
     ("Observed (epi update)", "obs::conf_d",    "Confirmed deaths",                    "confirmed_deaths", "reds", "log", "int"),
     ("Observed (epi update)", "obs::susp_d",    "Suspected deaths",                    "suspected_deaths", "reds", "log", "int"),
-    ("Modeled projection",    "cal::true",      "Relative risk",                       "relative_risk",    "viridis", "log", 2),
+    ("Modeled projection",    "cal::true",      "Relative risk",                       "relative_risk",    "outbreak", "log", 2),
     ("Incoming Mobility",     "disp::in",       "Incoming displaced persons (12mo)",   "displaced_in_individuals_12mo", "reds", "log", "int"),
     ("Incoming Mobility",     "flow::in",       "Flowminder incoming travel",          "flowminder_in_mar2026",         "reds", "log", "int"),
     ("Distance from Mongbwalu","d::travel",      "Travel time from Mongbwalu (hours)",   "travel_time_to_mongbwalu_h",    "plasma_r", "linear", 1),
@@ -1631,7 +1632,7 @@ HTML_TEMPLATE = r"""<!doctype html>
   .info-empty { color:#888; font-style:italic; }
   .footer { font-size:10px; color:#888; margin-top:8px; }
   .checkbox-row { display:flex; align-items:center; margin-top:6px; gap:6px; }
-  .case-icon { width:14px; height:14px; border-radius:50%; background:#ff1f4d; border:2px solid #fff; box-shadow:0 0 6px rgba(255,31,77,0.95); }
+  .case-icon { width:14px; height:14px; border-radius:50%; background:rgba(91,134,179,0.85); border:1.5px solid #fff; box-shadow:0 0 6px rgba(91,134,179,0.45); }
   h4 { margin: 8px 0 2px 0; font-size: 12px; color: #ffd28a; font-weight: 600; }
   .link-btn {
     display:inline-block; margin-top:4px; padding:2px 8px;
@@ -1912,10 +1913,16 @@ const PLASMA = [
 const REDS = [
   [255,245,235],[254,217,181],[253,173,118],[252,127,73],[239,77,55],
   [205,32,32],[140,17,17]];
+// Brand sequential ramp: #f6e3df → #e8b3a6 → #d08163 → #aa4a32 → #7c1d1d
+const OUTBREAK = [
+  [246,227,223],[232,179,166],[208,129,99],[170,74,50],[124,29,29]];
 const VIRIDIS = [
   [68,1,84],[72,40,120],[62,73,137],[49,104,142],[38,130,142],[31,158,137],
   [53,183,121],[109,206,89],[180,222,44],[253,231,37]];
-const PALETTES = {plasma:PLASMA, plasma_r:[...PLASMA].reverse(), reds:REDS, viridis:VIRIDIS};
+const PALETTES = {
+  plasma:PLASMA, plasma_r:[...PLASMA].reverse(),
+  reds:REDS, outbreak:OUTBREAK, viridis:VIRIDIS,
+};
 
 function lerpColor(stops, t) {
   if (t <= 0) return stops[0];
@@ -1942,15 +1949,15 @@ function valueForZone(zone, layer) {
 // --- map setup ---
 const INITIAL_VIEW = PAYLOAD.initial_view || {lat: -2.5, lon: 22.5, zoom: 5};
 const map = L.map("map").setView([INITIAL_VIEW.lat, INITIAL_VIEW.lon], INITIAL_VIEW.zoom);
-L.tileLayer("https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png", {
+L.tileLayer("https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png", {
   attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OSM</a>, &copy; <a href="https://carto.com/attributions">CARTO</a>',
   subdomains: "abcd", maxZoom: 19
 }).addTo(map);
 
-const NO_DATA_FILL = "#3a3a3a";
-const ZERO_FILL    = "#5a5a5a";
+const NO_DATA_FILL = "#dcd8d0";
+const ZERO_FILL    = "#c4bfb6";
 let currentValues = new Map();
-let currentDomain = {min:0, max:1, isLog:true, palette:REDS};
+let currentDomain = {min:0, max:1, isLog:true, palette:OUTBREAK};
 
 function recompute() {
   const layer = getLayer(layerSelect.value);
@@ -2002,10 +2009,14 @@ function styleFn(feature) {
   const v = currentValues.get(ref);
   const has = v != null && !Number.isNaN(v);
   const isZero = has && (currentDomain.isLog ? v <= 0 : v === 0);
+  const layer = getLayer(layerSelect.value);
+  const isOutbreak = layer && layer.palette === "outbreak";
+  const dataOpacity = isOutbreak ? 0.72 : 0.85;
+  const mutedOpacity = isOutbreak ? 0.48 : 0.55;
   return {
     color:"#111", weight:0.35,
     fillColor: valueToColor(v),
-    fillOpacity: (!has || isZero) ? 0.55 : 0.85
+    fillOpacity: (!has || isZero) ? mutedOpacity : dataOpacity
   };
 }
 
@@ -2144,18 +2155,30 @@ const geoLayer = L.geoJSON(PAYLOAD.geometry, {
 }).addTo(map);
 
 // --- province outlines (Trends view) ---
+function themeVar(name, fallback) {
+  const v = getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+  return v || fallback;
+}
+function provinceOutlineStyle(hovered) {
+  return {
+    color: hovered
+      ? themeVar("--province-outline-hover", "#b23b2e")
+      : themeVar("--province-outline", "#9b7d4e"),
+    weight: hovered
+      ? parseFloat(themeVar("--province-outline-weight-hover", "1.5"))
+      : parseFloat(themeVar("--province-outline-weight", "1")),
+    opacity: hovered ? 1 : 0.88,
+    fillOpacity: 0,
+  };
+}
+
 map.createPane("province-outline");
 map.getPane("province-outline").style.zIndex = 550;
 const provinceOutlineLayer = L.geoJSON(PAYLOAD.province_boundaries || {type:"FeatureCollection", features:[]}, {
   pane: "province-outline",
   interactive: false,
   style: function() {
-    return {
-      color: "#ffd28a",
-      weight: 2.5,
-      opacity: 0.95,
-      fillOpacity: 0,
-    };
+    return provinceOutlineStyle(false);
   },
 });
 
@@ -2165,12 +2188,7 @@ function applyProvinceOutlineStyles(hoveredProvince) {
   provinceOutlineLayer.eachLayer(function(layer) {
     const match = trendsHoveredProvince &&
       layer.feature.properties.province === trendsHoveredProvince;
-    layer.setStyle({
-      color: match ? "#ffae42" : "#ffd28a",
-      weight: match ? 3 : 2.5,
-      opacity: 1,
-      fillOpacity: 0,
-    });
+    layer.setStyle(provinceOutlineStyle(!!match));
     if (match) layer.bringToFront();
   });
   renderTrendsPanel(trendsHoveredProvince);
@@ -2387,12 +2405,30 @@ def _json_default(o):
     raise TypeError(f"unserializable: {type(o)}")
 
 
+def load_theme_css() -> str:
+    """Optional brand/theme layer (Phase A: tokens + Leaflet; Phase B: panel overrides)."""
+    if not THEME_CSS.exists():
+        print(f"  NOTE: {THEME_CSS} not found; skipping theme CSS")
+        return ""
+    css = THEME_CSS.read_text(encoding="utf-8").strip()
+    if css:
+        print(f"  theme CSS: {THEME_CSS.name} ({len(css)} bytes)")
+    return css
+
+
 def main() -> int:
     payload = build_payload()
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
     payload_json = json.dumps(payload, separators=(",", ":"), default=_json_default,
                               allow_nan=False)
     html = HTML_TEMPLATE.replace("__PAYLOAD__", payload_json)
+    theme_css = load_theme_css()
+    if theme_css:
+        html = html.replace(
+            "</head>",
+            f"<style>\n{theme_css}\n</style>\n</head>",
+            1,
+        )
     OUTPUT_PATH.write_text(html)
     print(f"\nwrote {OUTPUT_PATH} ({len(html) / 1e6:.1f} MB)")
     return 0
