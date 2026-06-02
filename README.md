@@ -118,7 +118,13 @@ Workflow [`.github/workflows/build-dashboard.yml`](.github/workflows/build-dashb
 
 Commits `output/dashboard.html` and `index.html` back to **`main`**.
 
-**Secret (data repo only):** add `DASHBOARD_DISPATCH_TOKEN` — a fine-grained PAT with **contents: write** on `BDBV2026-Epidemic_Dashboard`. Without it, release dispatch steps warn and skip (local/manual builds still work).
+**Secrets (this repo):**
+
+| Secret | Purpose |
+|---|---|
+| `EXTERNAL_REPO_TOKEN` | Fine-grained PAT with **Contents: Read** on `BDBV2026-Linelist_Processing` only (private repo checkout) |
+
+**Secret (data repo only):** `DASHBOARD_DISPATCH_TOKEN` — fine-grained PAT with **Contents: Write** on `BDBV2026-Epidemic_Dashboard`. Without it, release dispatch steps warn and skip (local/manual builds still work).
 
 ## Citation
 Please cite the original data providers (links above) and this repository if any code or derived data is reused.

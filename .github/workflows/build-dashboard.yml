@@ -119,6 +119,7 @@ jobs:
           repository: ${{ env.LINELIST_REPO }}
           ref: ${{ steps.refs.outputs.linelist_ref }}
           path: BDBV2026-Linelist_Processing
+          token: ${{ secrets.EXTERNAL_REPO_TOKEN }}
 
       - name: Sync dashboard plots from linelist
         run: |
