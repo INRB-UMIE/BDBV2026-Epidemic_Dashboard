@@ -1,5 +1,6 @@
 # Build output/dashboard.html and sync index.html for GitHub Pages.
-# Triggered manually, on dashboard pushes, or via repository_dispatch from BDBV2026-Data.
+# Triggered on dashboard pushes to main, via repository_dispatch from BDBV2026-Data,
+# or manually.
 
 name: Build dashboard
 
@@ -7,16 +8,17 @@ on:
   push:
     branches:
       - main
-    paths:
-      - "Scripts/**"
-      - "Data/**"
-      - "layer_config.yaml"
-      - "requirements.txt"
-      - ".github/workflows/build-dashboard.yml"
+    paths-ignore:
+      - "output/**"
+      - "index.html"
   workflow_dispatch:
     inputs:
       data_repo_ref:
-        description: "BDBV2026-Data git ref (branch, tag, or SHA)"
+        description: "BDBV2026-Data git ref (branch, tag, or SHA). Leave empty for latest GitHub release."
+        required: false
+        default: ""
+      linelist_repo_ref:
+        description: "BDBV2026-Linelist_Processing git ref for dashboard_plots/. Default: main."
         required: false
         default: "main"
   repository_dispatch:
@@ -31,6 +33,7 @@ concurrency:
 
 env:
   DATA_REPO: INRB-UMIE/BDBV2026-Data
+  LINELIST_REPO: INRB-UMIE/BDBV2026-Linelist_Processing
 
 jobs:
   build:
@@ -38,11 +41,30 @@ jobs:
     steps:
       - name: Resolve refs
         id: refs
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
+
+          resolve_latest_data_ref() {
+            if release_json="$(gh release view --repo "${DATA_REPO}" --json targetCommitish,tagName 2>/dev/null)"; then
+              ref="$(jq -r '.targetCommitish' <<< "${release_json}")"
+              tag="$(jq -r '.tagName' <<< "${release_json}")"
+              echo "Using latest ${DATA_REPO} release ${tag} @ ${ref}" >&2
+              echo "${ref}"
+              return
+            fi
+            echo "::warning::No GitHub release found on ${DATA_REPO}; falling back to main." >&2
+            echo "main"
+          }
+
           DASH_REF="${{ github.ref_name }}"
-          DATA_REF="main"
+          DATA_REF=""
+          LINELIST_REF="main"
+          DATA_SOURCE="latest-release"
+
           if [ "${{ github.event_name }}" = "repository_dispatch" ]; then
+            DATA_SOURCE="dispatch"
             if [ -n "${{ github.event.client_payload.dashboard_branch }}" ]; then
               DASH_REF="${{ github.event.client_payload.dashboard_branch }}"
             fi
@@ -52,12 +74,28 @@ jobs:
               DATA_REF="${{ github.event.client_payload.sha }}"
             fi
           elif [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            DATA_REF="${{ inputs.data_repo_ref }}"
+            DATA_SOURCE="manual"
+            if [ -n "${{ inputs.data_repo_ref }}" ]; then
+              DATA_REF="${{ inputs.data_repo_ref }}"
+            fi
+            if [ -n "${{ inputs.linelist_repo_ref }}" ]; then
+              LINELIST_REF="${{ inputs.linelist_repo_ref }}"
+            fi
+          else
+            DATA_SOURCE="dashboard-push"
           fi
+
+          if [ -z "${DATA_REF}" ]; then
+            DATA_REF="$(resolve_latest_data_ref)"
+          fi
+
           echo "dashboard_ref=${DASH_REF}" >> "$GITHUB_OUTPUT"
           echo "data_ref=${DATA_REF}" >> "$GITHUB_OUTPUT"
+          echo "linelist_ref=${LINELIST_REF}" >> "$GITHUB_OUTPUT"
+          echo "data_source=${DATA_SOURCE}" >> "$GITHUB_OUTPUT"
           echo "Dashboard branch: ${DASH_REF}"
-          echo "Data repo ref: ${DATA_REF}"
+          echo "Data ref: ${DATA_REF}"
+          echo "Linelist ref: ${LINELIST_REF}"
 
       - name: Checkout dashboard
         uses: actions/checkout@v4
@@ -74,6 +112,28 @@ jobs:
           ref: ${{ steps.refs.outputs.data_ref }}
           lfs: true
           path: BDBV2026-Data
+
+      - name: Checkout linelist repo
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ env.LINELIST_REPO }}
+          ref: ${{ steps.refs.outputs.linelist_ref }}
+          path: BDBV2026-Linelist_Processing
+
+      - name: Sync dashboard plots from linelist
+        run: |
+          set -euo pipefail
+          src="${{ github.workspace }}/BDBV2026-Linelist_Processing/dashboard_plots"
+          dest="${{ github.workspace }}/dashboard/Data/dashboard_plots"
+          if [ ! -f "${src}/manifest.json" ]; then
+            echo "::warning::No dashboard_plots/manifest.json in linelist repo; trends plots may be unavailable."
+            exit 0
+          fi
+          rm -rf "${dest}"
+          mkdir -p "${dest}"
+          rsync -a --exclude='palette_options/' "${src}/" "${dest}/"
+          echo "Synced dashboard plots:"
+          ls -la "${dest}"
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -99,6 +159,9 @@ jobs:
         working-directory: dashboard
         env:
           DATA_REF: ${{ steps.refs.outputs.data_ref }}
+          LINELIST_REF: ${{ steps.refs.outputs.linelist_ref }}
+          DATA_REPO: ${{ env.DATA_REPO }}
+          LINELIST_REPO: ${{ env.LINELIST_REPO }}
         run: |
           set -euo pipefail
           git config user.name "github-actions[bot]"
@@ -108,5 +171,5 @@ jobs:
             echo "No HTML changes to commit."
             exit 0
           fi
-          git commit -m "CI: rebuild dashboard from ${DATA_REPO}@${DATA_REF}"
+          git commit -m "CI: rebuild dashboard from ${DATA_REPO}@${DATA_REF} and ${LINELIST_REPO}@${LINELIST_REF}"
           git push origin "HEAD:${{ steps.refs.outputs.dashboard_ref }}"

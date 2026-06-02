@@ -9,7 +9,7 @@ This work is led by the Institut National de Santé Publique (INSP) (Pierre Akil
 - **health_zone_metadata.csv** Metadata file for dashboard, see below. 
 - **ic_model_estimates.csv** (optional) Imperial College model date and case bounds for the tracker tooltip (`PAYLOAD.ic_model`; independent of INSP sitreps).
 - **caveats.csv** (optional) Per-metric warnings in the title-panel tracker: `metric` (`confirmed_cases`, `suspected_cases`, `confirmed_deaths`, `suspected_deaths`) and `warning` text; adds a mark beside the count and a footnote below.
-- **dashboard_plots/** (optional) Pre-built province SVG charts for the Trends tab (`manifest.json` + `daily_onset_*.svg`). Copy from [EBOV2026_Linelist_Processing](https://github.com/INRB-UMIE/EBOV2026_Linelist_Processing) after running `src/3-dashboard_plots/build_onset_plots.py`.
+- **dashboard_plots/** (optional) Pre-built province SVG charts for the Trends tab (`manifest.json` + `daily_onset_*.svg`). CI copies the latest plots from [BDBV2026-Linelist_Processing](https://github.com/INRB-UMIE/BDBV2026-Linelist_Processing) before each build; locally, run `src/3-dashboard_plots/build_onset_plots.py` there and copy into `Data/dashboard_plots/`.
 - **Methods** Methods for dashboard, see below.
 - **ToS** ToS for dashboard, see below. 
 
@@ -102,13 +102,23 @@ cp output/dashboard.html index.html
 
 ## Automated rebuild (GitHub Actions)
 
-Workflow [`.github/workflows/build-dashboard.yml`](.github/workflows/build-dashboard.yml) checks out this repo and [`BDBV2026-Data`](https://github.com/INRB-UMIE/BDBV2026-Data) on **`main`**, runs the build, and commits `output/dashboard.html` and `index.html` back to **`main`**.
+Workflow [`.github/workflows/build-dashboard.yml`](.github/workflows/build-dashboard.yml) builds the dashboard from three sources:
 
-**Run manually:** Actions → *Build dashboard* → *Run workflow* (on `main`) → optional `data_repo_ref` (default `main`).
+| Source | Repo | Ref used |
+|---|---|---|
+| Geometry & datasets | [`BDBV2026-Data`](https://github.com/INRB-UMIE/BDBV2026-Data) | Latest GitHub **release** (or the exact commit dispatched after a data release) |
+| Trends-tab SVGs | [`BDBV2026-Linelist_Processing`](https://github.com/INRB-UMIE/BDBV2026-Linelist_Processing) | `main` |
+| Dashboard config & copy | this repo | triggering commit on `main` |
 
-**Triggered from the data repo:** automatically after a successful [release](https://github.com/INRB-UMIE/BDBV2026-Data/blob/main/.github/workflows/release.yml) on `main`. Manual escape hatch: *Trigger dashboard rebuild* on the data repo.
+**Triggers:**
 
-**Secret (data repo only):** add `DASHBOARD_DISPATCH_TOKEN` — a fine-grained PAT with **contents: write** on `BDBV2026-Epidemic_Dashboard`. Without it, dispatch steps warn and skip (local/manual builds still work).
+- **Push to `main`** (any file except `index.html` / `output/**`) — rebuild with latest data release + latest linelist plots.
+- **Data release** — `release.yml` on the data repo dispatches after a successful release; uses that release commit.
+- **Manual** — Actions → *Build dashboard* → optional `data_repo_ref` (empty = latest release) and `linelist_repo_ref` (default `main`).
+
+Commits `output/dashboard.html` and `index.html` back to **`main`**.
+
+**Secret (data repo only):** add `DASHBOARD_DISPATCH_TOKEN` — a fine-grained PAT with **contents: write** on `BDBV2026-Epidemic_Dashboard`. Without it, release dispatch steps warn and skip (local/manual builds still work).
 
 ## Citation
 Please cite the original data providers (links above) and this repository if any code or derived data is reused.
