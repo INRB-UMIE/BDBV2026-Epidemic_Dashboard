@@ -73,7 +73,7 @@ OUTPUT_DIR = SCRIPT_DIR.parent / "output"
 OUTPUT_PATH = OUTPUT_DIR / "dashboard.html"
 
 BUILD_DIR = Path(os.environ.get("BUILD_DIR") or
-                 (SCRIPT_DIR.parent.parent / "Ebola_DRC_2026" / "build")).resolve()
+                 (SCRIPT_DIR.parent.parent / "BDBV-Data" / "build")).resolve()
 BUILD_GEOJSON    = BUILD_DIR / "drc_health_zones.geojson"
 BUILD_LONG_DIR   = BUILD_DIR / "long"
 EXTERNAL_DATA    = BUILD_DIR.parent / "data"

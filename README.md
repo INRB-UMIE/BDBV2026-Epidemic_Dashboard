@@ -15,7 +15,7 @@ This work is led by the Institut National de Santé Publique (INSP) (Pierre Akil
 
 ## Repository layout
 ```
-EBOV2026_Epidemic_Dashboard/
+BDBV-Epidemic_Dashboard/
 ├── Scripts/
 │   └── build_dashboard_public.py   # builds output/dashboard.html
 ├── layer_config.yaml               # map layer exclusions, labels, palettes (requires PyYAML)
@@ -37,22 +37,22 @@ EBOV2026_Epidemic_Dashboard/
 
 **Required companion repo:** The build script reads geometry, epidemiological
 data, population, health facility, OSRM travel-time, IDP, and Flowminder
-data from the [Ebola_DRC_2026](https://github.com/INRB-UMIE/Ebola_DRC_2026)
+data from the [BDBV2026-Data](https://github.com/INRB-UMIE/BDBV2026-Data)
 repository. It must be cloned as a sibling directory:
 
 ```
 inrb/
-├── Ebola_DRC_2026/          # companion repo (must be built first)
+├── BDBV-Data/               # companion repo (must be built first)
 │   ├── build/
 │   │   ├── drc_health_zones.geojson   # zone polygons + embedded properties
 │   │   └── long/                      # OSRM matrices, etc.
 │   └── data/
 │       ├── IDP/processed/             # displacement matrices
 │       └── flowminder/processed/      # mobility matrices
-└── EBOV2026_Epidemic_Dashboard/       # this repo
+└── BDBV-Epidemic_Dashboard/           # this repo
 ```
 
-Run the Ebola_DRC_2026 build pipeline first so that `build/` is populated.
+Run the BDBV2026-Data build pipeline first so that `build/` is populated.
 
 ## Setup
 
@@ -89,7 +89,7 @@ Override default paths with environment variables if the repos are not
 sibling directories:
 
 ```bash
-BUILD_DIR=/path/to/Ebola_DRC_2026/build \
+BUILD_DIR=/path/to/BDBV-Data/build \
 DATA_ROOT=/path/to/Data \
 python Scripts/build_dashboard_public.py
 ```
@@ -102,15 +102,15 @@ cp output/dashboard.html index.html
 
 ## Automated rebuild (GitHub Actions)
 
-Workflow [`.github/workflows/build-dashboard.yml`](.github/workflows/build-dashboard.yml) checks out this repo and [`Ebola_DRC_2026`](https://github.com/INRB-UMIE/Ebola_DRC_2026), runs the build, and commits `output/dashboard.html` and `index.html` back to the branch that triggered the run.
+Workflow [`.github/workflows/build-dashboard.yml`](.github/workflows/build-dashboard.yml) checks out this repo and [`BDBV2026-Data`](https://github.com/INRB-UMIE/BDBV2026-Data), runs the build, and commits `output/dashboard.html` and `index.html` back to the branch that triggered the run.
 
 **Test branch:** `automate_dashboard_deployment` (also `main` for production).
 
-**Run manually:** Actions → *Build dashboard* → *Run workflow* → set `data_repo_ref` (default `automate_dashboard_deployment`).
+**Run manually:** Actions → *Build dashboard* → *Run workflow* → set `data_repo_ref` (default `main`).
 
-**Triggered from the data repo:** after a successful release on `main`, or via [`trigger-dashboard-rebuild`](https://github.com/INRB-UMIE/Ebola_DRC_2026/blob/main/.github/workflows/trigger-dashboard-rebuild.yml) on the data repo.
+**Triggered from the data repo:** after a successful release on `main`, or via [`trigger-dashboard-rebuild`](https://github.com/INRB-UMIE/BDBV2026-Data/blob/main/.github/workflows/trigger-dashboard-rebuild.yml) on the data repo.
 
-**Secret (data repo only):** add `DASHBOARD_DISPATCH_TOKEN` — a fine-grained PAT with **contents: write** on `EBOV2026_Epidemic_Dashboard`. Without it, dispatch steps warn and skip (local/manual builds still work).
+**Secret (data repo only):** add `DASHBOARD_DISPATCH_TOKEN` — a fine-grained PAT with **contents: write** on `BDBV2026-Epidemic_Dashboard`. Without it, dispatch steps warn and skip (local/manual builds still work).
 
 ## Citation
 Please cite the original data providers (links above) and this repository if any code or derived data is reused.

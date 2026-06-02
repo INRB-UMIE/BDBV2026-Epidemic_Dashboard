@@ -1,5 +1,5 @@
 # Build output/dashboard.html and sync index.html for GitHub Pages.
-# Triggered manually, on dashboard pushes, or via repository_dispatch from Ebola_DRC_2026.
+# Triggered manually, on dashboard pushes, or via repository_dispatch from BDBV2026-Data.
 
 name: Build dashboard
 
@@ -17,9 +17,9 @@ on:
   workflow_dispatch:
     inputs:
       data_repo_ref:
-        description: "Ebola_DRC_2026 git ref (branch, tag, or SHA)"
+        description: "BDBV2026-Data git ref (branch, tag, or SHA)"
         required: false
-        default: "automate_dashboard_deployment"
+        default: "main"
   repository_dispatch:
     types: [data-updated]
 
@@ -31,7 +31,7 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  DATA_REPO: INRB-UMIE/Ebola_DRC_2026
+  DATA_REPO: INRB-UMIE/BDBV2026-Data
 
 jobs:
   build:
@@ -42,7 +42,7 @@ jobs:
         run: |
           set -euo pipefail
           DASH_REF="${{ github.ref_name }}"
-          DATA_REF="automate_dashboard_deployment"
+          DATA_REF="main"
           if [ "${{ github.event_name }}" = "repository_dispatch" ]; then
             if [ -n "${{ github.event.client_payload.dashboard_branch }}" ]; then
               DASH_REF="${{ github.event.client_payload.dashboard_branch }}"
@@ -74,7 +74,7 @@ jobs:
           repository: ${{ env.DATA_REPO }}
           ref: ${{ steps.refs.outputs.data_ref }}
           lfs: true
-          path: Ebola_DRC_2026
+          path: BDBV2026-Data
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -89,7 +89,7 @@ jobs:
       - name: Build dashboard HTML
         working-directory: dashboard
         env:
-          BUILD_DIR: ${{ github.workspace }}/Ebola_DRC_2026/build
+          BUILD_DIR: ${{ github.workspace }}/BDBV2026-Data/build
           DATA_ROOT: ${{ github.workspace }}/dashboard/Data
         run: |
           set -euo pipefail
