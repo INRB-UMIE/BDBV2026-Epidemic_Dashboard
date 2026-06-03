@@ -1707,6 +1707,8 @@ HTML_TEMPLATE = r"""<!doctype html>
   .footer { font-size:10px; color:#888; margin-top:8px; }
   .checkbox-row { display:flex; align-items:center; margin-top:6px; gap:6px; }
   .case-icon { width:14px; height:14px; border-radius:50%; background:rgba(91,134,179,0.85); border:1.5px solid #fff; box-shadow:0 0 6px rgba(91,134,179,0.45); }
+  /* Trends view: let province hover drive the plot; dots must not steal pointer events. */
+  body.view-trends .leaflet-marker-pane .leaflet-marker-icon { pointer-events: none !important; }
   h4 { margin: 8px 0 2px 0; font-size: 12px; color: #ffd28a; font-weight: 600; }
   .link-btn {
     display:inline-block; margin-top:4px; padding:2px 8px;
@@ -2189,6 +2191,7 @@ function infoHTML(feature) {
   h += "<table>";
   h += "<tr><td>displaced persons (12mo)</td><td>" + fmt(z.displaced_in_individuals_12mo) + "</td></tr>";
   h += "<tr><td>Flowminder travel (Mar 2026)</td><td>" + fmt(z.flowminder_in_mar2026) + "</td></tr>";
+  h += "<tr><td>From outbreak epicenter (May 2026)</td><td>" + fmt(z.flowminder_short_trips__outflow_20260524__outflow_20260524, "cal") + "</td></tr>";
   h += "</table>";
 
   h += "<h4>Distance from " + TRAVEL_FROM + "</h4>";
