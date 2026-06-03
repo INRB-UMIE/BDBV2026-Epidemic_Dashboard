@@ -1,9 +1,20 @@
-# Ebola Bundibugyo DRC 2026 — Dashboard
+# Bundibugyo Ebola virus outbreak 2026 — Dashboard
 
 ![Logos for Project Lead Organizations: Institute National de Recherche Biomedicale (INRB), One Health Institute for Africa (INOHA), Institut National de Santé Publique (INSP), Unité de Modélisation et Intelligence Epidémique (UMIE), and AfricaCDC](https://github.com/INRB-UMIE/BDBV2026-Epidemic_Dashboard/blob/main/Data/Branding/all_logos.png)
 
-## Contributors
-This work is led by the Institut National de Santé Publique (INSP) (Pierre Akilimali, Adelard Lofungola) and the Institut National de Recherche Biomédicale (INRB) Kinshasa/One Health Institute for Africa (INOHA) Kinshasa (Dav Ebengo, Placide Mbala-Kingebeni and Tania Bishola) in collaboration with the AfricaCDC and partners across the University of Oxford and Northeastern University; please contact dav.ebengo@umie-inrb.org or pierre.akilimali@insp.cd for further information.
+This work is led by the Institut National de Recherche Biomédicale (INRB) Kinshasa/One Health Institute for Africa (INOHA) Kinshasa (Dav Ebengo, Placide Mbala-Kingebeni and Tania Bishola), and the Institut National de Santé Publique (INSP) (Pierre Akilimali, Adelard Lofungola).
+
+**Collaborating institutions and agencies**
+- Institut National de Santé Publique (INSP)
+- National Institute of Biomedical Research (INRB)
+- Africa Centres for Disease Control and Prevention, Addis Ababa, Ethiopia
+- World Health Organization, Geneva, Switzerland
+- World Health Organization Country Office, Kinshasa, Democratic Republic of the Congo
+- Northeastern University, United States
+- University of Oxford, United Kingdom
+
+# Statement on continuing work and analyses before publication
+Please note that the epidemiological data presented here is based on work in progress and should be considered preliminary. Our analyses are ongoing, and a publication communicating our findings is in preparation. Contextual data are publicly accessible; please refer to the original license when re-using these data. If you intend to use the epidemiological data prior to our publication, or have other enquiries, please contact [Prof. Placide Mbala-Kingebeni](mailto:placide.mbala@inrb.cd) (INRB, DRC), [Prof. Dav Ebengo](mailto:dav.ebengo@umie-inrb.org) (INRB, DRC), and [Pierre Akilimali](mailto:pierre.akilimali@insp.cd) (INSP).
 
 ## Data
 - **health_zone_metadata.csv** Metadata file for dashboard, see below. 
