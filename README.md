@@ -1,4 +1,4 @@
-# Ebola Bundibugyo DRC 2026 — Dashboard
+# Bundibugyo Ebola virus outbreak 2026 — Dashboard
 
 ![Logos for Project Lead Organizations: Institute National de Recherche Biomedicale (INRB), One Health Institute for Africa (INOHA), Institut National de Santé Publique (INSP), Unité de Modélisation et Intelligence Epidémique (UMIE), and AfricaCDC](https://github.com/INRB-UMIE/BDBV2026-Epidemic_Dashboard/blob/main/Data/Branding/all_logos.png)
 
