@@ -73,7 +73,7 @@ OUTPUT_DIR = SCRIPT_DIR.parent / "output"
 OUTPUT_PATH = OUTPUT_DIR / "dashboard.html"
 
 BUILD_DIR = Path(os.environ.get("BUILD_DIR") or
-                 (SCRIPT_DIR.parent.parent / "BDBV-Data" / "build")).resolve()
+                 (SCRIPT_DIR.parent.parent / "BDBV2026-Data" / "build")).resolve()
 BUILD_GEOJSON    = BUILD_DIR / "drc_health_zones.geojson"
 BUILD_LONG_DIR   = BUILD_DIR / "long"
 EXTERNAL_DATA    = BUILD_DIR.parent / "data"
@@ -1281,6 +1281,57 @@ def extract_geojson_fields(
 # extra (non-GeoJSON) layers: matrices, local CSV, computed fields
 # ---------------------------------------------------------------------------
 
+# Flowminder short-trip cohort proportions (Bunia / Mongbalu / Rwampara).
+# Flat field names match build GeoJSON: flowminder_short_trips.<metric>.<metric>.
+_FLOWMINDER_SHORT_TRIPS_LAYER_DEFS = [
+    # (group, layer_id, label, field, palette, scale, legend_round)
+    (
+        "Incoming Mobility",
+        "fmst::20260430",
+        "Flowminder movements from epicentre until April 30",
+        "flowminder_short_trips__outflow_20260430__outflow_20260430",
+        "reds",
+        "log",
+        1,
+    ),
+    (
+        "Incoming Mobility",
+        "fmst::20260507",
+        "Flowminder movements from epicentre until May 7",
+        "flowminder_short_trips__outflow_20260507__outflow_20260507",
+        "reds",
+        "log",
+        1,
+    ),
+    (
+        "Incoming Mobility",
+        "fmst::20260514",
+        "Flowminder movements from epicentre until May 14",
+        "flowminder_short_trips__outflow_20260514__outflow_20260514",
+        "reds",
+        "log",
+        1,
+    ),
+    (
+        "Incoming Mobility",
+        "fmst::20260521",
+        "Flowminder movements from epicentre until May 21",
+        "flowminder_short_trips__outflow_20260521__outflow_20260521",
+        "reds",
+        "log",
+        1,
+    ),
+    (
+        "Incoming Mobility",
+        "fmst::20260524",
+        "Flowminder movements from epicentre until May 24",
+        "flowminder_short_trips__outflow_20260524__outflow_20260524",
+        "reds",
+        "log",
+        1,
+    ),
+]
+
 EXTRA_LAYER_DEFS = [
     # (group, layer_id, label, field, palette, scale, legend_round)
     ("Observed (epi update)", "obs::total",     "Total cases (confirmed + suspected)", "total_cases",      "reds", "log", "int"),
@@ -1290,14 +1341,32 @@ EXTRA_LAYER_DEFS = [
     ("Observed (epi update)", "obs::susp_d",    "Suspected deaths",                    "suspected_deaths", "reds", "log", "int"),
     ("Modeled projection",    "cal::true",      "Relative risk",                       "relative_risk",    "outbreak", "log", 2),
     ("Incoming Mobility",     "disp::in",       "Incoming displaced persons (12mo)",   "displaced_in_individuals_12mo", "reds", "log", "int"),
-    ("Incoming Mobility",     "flow::in",       "Flowminder incoming travel",          "flowminder_in_mar2026",         "reds", "log", "int"),
+    ("Incoming Mobility",     "flow::in",       "Flowminder incoming relocations (March 2026)",          "flowminder_in_mar2026",         "reds", "log", "int"),
     ("Distance from Mongbwalu","d::travel",      "Travel time from Mongbwalu (hours)",   "travel_time_to_mongbwalu_h",    "plasma_r", "linear", 1),
     ("Distance from Mongbwalu","d::geo",         "Road distance from Mongbwalu (km)",    "geodesic_to_mongbwalu_km",      "plasma_r", "linear", "int"),
+    *_FLOWMINDER_SHORT_TRIPS_LAYER_DEFS,
 ]
 
 PROJECTION_MASK_LAYERS = {"cal::true"}
 PROJECTION_MASK_FIELD = "relative_risk"
 PROJECTION_MASK_MIN = 0.005
+
+# Dropdown optgroup order (display names). Unlisted groups keep their relative
+# order after these entries.
+LAYER_GROUP_ORDER = [
+    "Observed (epi update)",
+    "Testing capacity",
+]
+
+
+def _sort_layers_for_dropdown(layers: list[dict]) -> list[dict]:
+    rank = {name: i for i, name in enumerate(LAYER_GROUP_ORDER)}
+    default_rank = len(LAYER_GROUP_ORDER)
+    indexed = sorted(
+        enumerate(layers),
+        key=lambda item: (rank.get(item[1]["group"], default_rank), item[0]),
+    )
+    return [layer for _, layer in indexed]
 
 
 # ---------------------------------------------------------------------------
@@ -1324,14 +1393,19 @@ def build_payload() -> dict:
         initial_view = {"lat": lat, "lon": lon, "zoom": 8}
 
     # Extra layers (computed fields, matrices, local CSV) go first,
-    # then auto-discovered GeoJSON layers.
+    # then auto-discovered GeoJSON layers. Extra defs override discovery labels
+    # for the same flat field (e.g. Flowminder short-trip outflow snapshots).
     extra_layers = [
         {"group": group, "id": lid, "label": label, "field": field,
          "palette": palette, "scale": scale, "source": "",
          "legend_round": legend_round}
         for (group, lid, label, field, palette, scale, legend_round) in EXTRA_LAYER_DEFS
     ]
-    layers = extra_layers + discovered_layers
+    extra_fields = {layer["field"] for layer in extra_layers}
+    discovered_layers = [
+        layer for layer in discovered_layers if layer["field"] not in extra_fields
+    ]
+    layers = _sort_layers_for_dropdown(extra_layers + discovered_layers)
 
     methods_html = load_methods_html()
     print(f"  methods HTML: {len(methods_html)} chars")
@@ -1633,6 +1707,8 @@ HTML_TEMPLATE = r"""<!doctype html>
   .footer { font-size:10px; color:#888; margin-top:8px; }
   .checkbox-row { display:flex; align-items:center; margin-top:6px; gap:6px; }
   .case-icon { width:14px; height:14px; border-radius:50%; background:rgba(91,134,179,0.85); border:1.5px solid #fff; box-shadow:0 0 6px rgba(91,134,179,0.45); }
+  /* Trends view: let province hover drive the plot; dots must not steal pointer events. */
+  body.view-trends .leaflet-marker-pane .leaflet-marker-icon { pointer-events: none !important; }
   h4 { margin: 8px 0 2px 0; font-size: 12px; color: #ffd28a; font-weight: 600; }
   .link-btn {
     display:inline-block; margin-top:4px; padding:2px 8px;
@@ -2115,6 +2191,7 @@ function infoHTML(feature) {
   h += "<table>";
   h += "<tr><td>displaced persons (12mo)</td><td>" + fmt(z.displaced_in_individuals_12mo) + "</td></tr>";
   h += "<tr><td>Flowminder travel (Mar 2026)</td><td>" + fmt(z.flowminder_in_mar2026) + "</td></tr>";
+  h += "<tr><td>From outbreak epicenter (May 2026)</td><td>" + fmt(z.flowminder_short_trips__outflow_20260524__outflow_20260524, "cal") + "</td></tr>";
   h += "</table>";
 
   h += "<h4>Distance from " + TRAVEL_FROM + "</h4>";

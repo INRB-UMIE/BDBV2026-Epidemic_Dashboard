@@ -35,6 +35,16 @@ groups:
     palette: reds
     scale: log
     legend_round: int
+  testing_capacity:
+    label: "Testing capacity"
+    palette: viridis
+    scale: log
+    legend_round: int
+  flowminder_short_trips:
+    label: "Movements from epicentre"
+    palette: reds
+    scale: log
+    legend_round: 1
   worldpop:
     label: "Population"
     palette: viridis
@@ -75,6 +85,8 @@ groups:
 group_order:
   - epi
   - insp_sitrep
+  - testing_capacity
+  - flowminder_short_trips
   - worldpop
   - grid3_healthsites
   - healthsites_io
