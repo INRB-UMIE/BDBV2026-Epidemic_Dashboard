@@ -56,7 +56,7 @@ import re
 import ssl
 import urllib.error
 import urllib.request
-from datetime import datetime
+from datetime import date, datetime
 from pathlib import Path
 
 import numpy as np
@@ -877,6 +877,33 @@ def _phr_category(metric: str) -> str:
     return metric.removeprefix("national_")
 
 
+def _parse_phr_date(value) -> datetime.date | None:
+    """Parse PHR ``_date`` values (ISO, slash forms, and INSP ``DD-MM-YYYY``)."""
+    if value is None:
+        return None
+    s = str(value).strip()
+    if not s:
+        return None
+    if len(s) >= 10 and s[2:3] == "-" and s[5:6] == "-":
+        try:
+            return datetime.strptime(s[:10], "%d-%m-%Y").date()
+        except ValueError:
+            pass
+    return _parse_sitrep_date(s)
+
+
+def _sort_phr_pillars(pillars: list[dict]) -> list[dict]:
+    """Newest ``date`` first; pillar label breaks ties. Ignores pillar metric order."""
+    return sorted(
+        pillars,
+        key=lambda p: (
+            _parse_phr_date(p.get("date")) or date.min,
+            p.get("label") or "",
+        ),
+        reverse=True,
+    )
+
+
 def _extract_phr_block(block: object) -> tuple[str | None, str | None]:
     """Return (narrative text, date string) from one GeoJSON metric object."""
     if not isinstance(block, dict):
@@ -921,14 +948,17 @@ def load_public_health_context() -> dict:
         text, date = _extract_phr_block(sample_phr.get(metric))
         if not text:
             continue
+        parsed = _parse_phr_date(date)
         national.append({
             "metric": metric,
             "category": _phr_category(metric),
             "label": _phr_metric_label(metric),
             "text": text,
             "date": date,
+            "date_iso": parsed.isoformat() if parsed else None,
             "scope": "national",
         })
+    national = _sort_phr_pillars(national)
 
     by_nom: dict[str, list[dict]] = {}
     for nom, props in props_by_nom.items():
@@ -940,16 +970,18 @@ def load_public_health_context() -> dict:
             text, date = _extract_phr_block(phr.get(metric))
             if not text:
                 continue
+            parsed = _parse_phr_date(date)
             pillars.append({
                 "metric": metric,
                 "category": _phr_category(metric),
                 "label": _phr_metric_label(metric),
                 "text": text,
                 "date": date,
+                "date_iso": parsed.isoformat() if parsed else None,
                 "scope": "zone",
             })
         if pillars:
-            by_nom[nom] = pillars
+            by_nom[nom] = _sort_phr_pillars(pillars)
 
     print(
         f"  public health context: {len(national)} national pillar(s), "
@@ -2822,6 +2854,15 @@ function formatContextDate(raw) {
   if (!raw) return "";
   const s = String(raw).trim();
   if (!s) return "";
+  if (s.length >= 10 && s[2] === "-" && s[5] === "-") {
+    const months = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+    const d = parseInt(s.slice(0, 2), 10);
+    const m = parseInt(s.slice(3, 5), 10);
+    const y = s.slice(6, 10);
+    if (m >= 1 && m <= 12 && d >= 1) {
+      return String(d) + " " + months[m - 1] + " " + y;
+    }
+  }
   if (s.length >= 10 && s[4] === "-" && s[7] === "-") {
     const parts = s.slice(0, 10).split("-");
     const months = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
@@ -2846,6 +2887,49 @@ function formatContextDate(raw) {
     }
   }
   return s;
+}
+
+function contextDateSortKey(pillar) {
+  if (pillar && pillar.date_iso) {
+    const t = Date.parse(pillar.date_iso);
+    if (!isNaN(t)) return t;
+  }
+  const raw = pillar ? pillar.date : null;
+  if (raw == null) return Number.NEGATIVE_INFINITY;
+  const s = String(raw).trim();
+  if (!s) return Number.NEGATIVE_INFINITY;
+  if (s.length >= 10 && s[2] === "-" && s[5] === "-") {
+    const d = parseInt(s.slice(0, 2), 10);
+    const m = parseInt(s.slice(3, 5), 10) - 1;
+    const y = parseInt(s.slice(6, 10), 10);
+    const t = Date.UTC(y, m, d);
+    if (!isNaN(t)) return t;
+  }
+  if (s.length >= 10 && s[4] === "-" && s[7] === "-") {
+    const t = Date.parse(s.slice(0, 10));
+    if (!isNaN(t)) return t;
+  }
+  if (s.indexOf("/") >= 0) {
+    const bits = s.split("/");
+    if (bits.length === 3) {
+      const a = parseInt(bits[0], 10), b = parseInt(bits[1], 10);
+      let y = parseInt(bits[2], 10);
+      if (y < 100) y += 2000;
+      const day = a > 12 ? a : b;
+      const month = (a > 12 ? b : a) - 1;
+      const t = Date.UTC(y, month, day);
+      if (!isNaN(t)) return t;
+    }
+  }
+  return Number.NEGATIVE_INFINITY;
+}
+
+function sortContextPillarsByDate(pillars) {
+  return pillars.slice().sort(function(a, b) {
+    const diff = contextDateSortKey(b) - contextDateSortKey(a);
+    if (diff !== 0) return diff;
+    return (a.label || "").localeCompare(b.label || "");
+  });
 }
 
 function phrPillarCategoryClass(pillar) {
@@ -2884,7 +2968,7 @@ function renderNationalContextPanel() {
     return;
   }
   body.className = "panel-body";
-  body.innerHTML = national.map(function(p) {
+  body.innerHTML = sortContextPillarsByDate(national).map(function(p) {
     return renderContextPillarHtml(p, {hideScopeTag: true});
   }).join("");
 }
@@ -2943,7 +3027,7 @@ function renderContextPanel(nom) {
     return;
   }
   body.className = "panel-body";
-  body.innerHTML = zonePillars.map(function(p) {
+  body.innerHTML = sortContextPillarsByDate(zonePillars).map(function(p) {
     return renderContextPillarHtml(p, {hideScopeTag: true});
   }).join("");
 }
