@@ -11,6 +11,7 @@ exclude:
   - refugee_sites
   - cross_border
   - insp_sitrep
+  - epi
   - gdp_pc
   # - healthsites_io                  # entire group
   # - cross_border__poe_passengers__n_poes   # single leaf
@@ -24,12 +25,10 @@ exclude:
 # legend_round controls how tick labels are formatted on the color bar:
 #   int  — round to nearest integer (default)
 #   0-6  — number of decimal places (e.g. 2 → "0.51")
+#
+# epicenter_highlight (optional): when true, Bunia / Mongbalu / Rwampara use a
+# fixed map colour and appear in the legend as "epicenter" (with zero / no data).
 groups:
-  epi:
-    label: "Observed (WHO)"
-    palette: outbreak
-    scale: log
-    legend_round: int
   insp_sitrep:
     label: "Observed (INSP sitrep)"
     palette: reds
@@ -45,6 +44,8 @@ groups:
     palette: reds
     scale: log
     legend_round: 1
+    # Highlight source zones (Bunia, Mongbalu, Rwampara) with a fixed map colour.
+    epicenter_highlight: true
   worldpop:
     label: "Population"
     palette: viridis
@@ -83,7 +84,6 @@ groups:
 # Groups listed here appear first in the layer dropdown, in this order.
 # Auto-discovered groups not listed here appear after, alphabetically.
 group_order:
-  - epi
   - insp_sitrep
   - testing_capacity
   - flowminder_short_trips

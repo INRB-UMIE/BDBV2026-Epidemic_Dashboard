@@ -100,6 +100,9 @@ THEME_CSS        = BRANDING_DIR / "dashboard-theme.css"
 SIMPLIFY_TOL = 0.001     # ~110 m at the equator; ~10× fewer vertices than raw
 COORD_DECIMALS = 5
 TRAVEL_FROM_ZONE = "Mongbwalu"
+# Canonical ``nom`` values for outbreak epicentres (Flowminder outflow sources).
+EPICENTER_SOURCE_NOMS = ("Bunia", "Mongbalu", "Rwampara")
+EPICENTER_FILL = "#7695E1"
 ASOF_FALLBACK = ""
 INSP_BASE_URL = "https://insp.cd/"
 INSP_FALLBACK_URL = INSP_BASE_URL
@@ -1550,6 +1553,7 @@ def discover_geojson_layers(
         palette = gcfg.get("palette", "viridis")
         scale = gcfg.get("scale", "log")
         legend_round = gcfg.get("legend_round", "int")
+        epicenter_highlight = bool(gcfg.get("epicenter_highlight", False))
         for flat, mkey, lkey, label in groups[gkey]:
             layer_id = f"{gkey}::{mkey}"
             if lkey != mkey:
@@ -1563,6 +1567,7 @@ def discover_geojson_layers(
                 "scale": scale,
                 "source": "",
                 "legend_round": legend_round,
+                "epicenter_highlight": epicenter_highlight,
             })
             field_paths[flat] = [gkey, mkey, lkey]
 
@@ -1597,8 +1602,8 @@ def extract_geojson_fields(
 
 # Flowminder short-trip cohort proportions (Bunia / Mongbalu / Rwampara).
 # Flat field names match build GeoJSON: flowminder_short_trips.<metric>.<metric>.
+# Tuple: group, id, label, field, palette, scale, legend_round, epicenter_highlight
 _FLOWMINDER_SHORT_TRIPS_LAYER_DEFS = [
-    # (group, layer_id, label, field, palette, scale, legend_round)
     (
         "Incoming Mobility",
         "fmst::20260430",
@@ -1607,6 +1612,7 @@ _FLOWMINDER_SHORT_TRIPS_LAYER_DEFS = [
         "reds",
         "log",
         1,
+        True,
     ),
     (
         "Incoming Mobility",
@@ -1616,6 +1622,7 @@ _FLOWMINDER_SHORT_TRIPS_LAYER_DEFS = [
         "reds",
         "log",
         1,
+        True,
     ),
     (
         "Incoming Mobility",
@@ -1625,6 +1632,7 @@ _FLOWMINDER_SHORT_TRIPS_LAYER_DEFS = [
         "reds",
         "log",
         1,
+        True,
     ),
     (
         "Incoming Mobility",
@@ -1634,6 +1642,7 @@ _FLOWMINDER_SHORT_TRIPS_LAYER_DEFS = [
         "reds",
         "log",
         1,
+        True,
     ),
     (
         "Incoming Mobility",
@@ -1643,23 +1652,47 @@ _FLOWMINDER_SHORT_TRIPS_LAYER_DEFS = [
         "reds",
         "log",
         1,
+        True,
     ),
 ]
 
 EXTRA_LAYER_DEFS = [
-    # (group, layer_id, label, field, palette, scale, legend_round)
-    ("Observed (epi update)", "obs::total",     "Total cases (confirmed + suspected)", "total_cases",      "reds", "log", "int"),
-    ("Observed (epi update)", "obs::confirmed", "Confirmed cases",                     "confirmed_cases",  "reds", "log", "int"),
-    ("Observed (epi update)", "obs::suspected", "Suspected cases",                     "suspected_cases",  "reds", "log", "int"),
-    ("Observed (epi update)", "obs::conf_d",    "Confirmed deaths",                    "confirmed_deaths", "reds", "log", "int"),
-    ("Observed (epi update)", "obs::susp_d",    "Suspected deaths",                    "suspected_deaths", "reds", "log", "int"),
-    ("Modeled projection",    "cal::true",      "Relative risk",                       "relative_risk",    "outbreak", "log", 2),
-    ("Incoming Mobility",     "disp::in",       "Incoming displaced persons (12mo)",   "displaced_in_individuals_12mo", "reds", "log", "int"),
-    ("Incoming Mobility",     "flow::in",       "Flowminder incoming relocations (March 2026)",          "flowminder_in_mar2026",         "reds", "log", "int"),
-    ("Distance from Mongbwalu","d::travel",      "Travel time from Mongbwalu (hours)",   "travel_time_to_mongbwalu_h",    "plasma_r", "linear", 1),
-    ("Distance from Mongbwalu","d::geo",         "Road distance from Mongbwalu (km)",    "geodesic_to_mongbwalu_km",      "plasma_r", "linear", "int"),
+    ("Observed (epi update)", "obs::total",     "Total cases (confirmed + suspected)", "total_cases",      "reds", "log", "int", False),
+    ("Observed (epi update)", "obs::confirmed", "Confirmed cases",                     "confirmed_cases",  "reds", "log", "int", False),
+    ("Observed (epi update)", "obs::suspected", "Suspected cases",                     "suspected_cases",  "reds", "log", "int", False),
+    ("Observed (epi update)", "obs::conf_d",    "Confirmed deaths",                    "confirmed_deaths", "reds", "log", "int", False),
+    ("Observed (epi update)", "obs::susp_d",    "Suspected deaths",                    "suspected_deaths", "reds", "log", "int", False),
+    ("Modeled projection",    "cal::true",      "Relative risk",                       "relative_risk",    "outbreak", "log", 2, False),
+    ("Incoming Mobility",     "disp::in",       "Incoming displaced persons (12mo)",   "displaced_in_individuals_12mo", "reds", "log", "int", False),
+    ("Incoming Mobility",     "flow::in",       "Flowminder incoming relocations (March 2026)",          "flowminder_in_mar2026",         "reds", "log", "int", True),
+    ("Distance from Mongbwalu","d::travel",      "Travel time from Mongbwalu (hours)",   "travel_time_to_mongbwalu_h",    "plasma_r", "linear", 1, False),
+    ("Distance from Mongbwalu","d::geo",         "Road distance from Mongbwalu (km)",    "geodesic_to_mongbwalu_km",      "plasma_r", "linear", "int", False),
     *_FLOWMINDER_SHORT_TRIPS_LAYER_DEFS,
 ]
+
+
+def _make_layer_def(
+    group: str,
+    layer_id: str,
+    label: str,
+    field: str,
+    palette: str,
+    scale: str,
+    legend_round,
+    epicenter_highlight: bool = False,
+    source: str = "",
+) -> dict:
+    return {
+        "group": group,
+        "id": layer_id,
+        "label": label,
+        "field": field,
+        "palette": palette,
+        "scale": scale,
+        "source": source,
+        "legend_round": legend_round,
+        "epicenter_highlight": epicenter_highlight,
+    }
 
 PROJECTION_MASK_LAYERS = {"cal::true"}
 PROJECTION_MASK_FIELD = "relative_risk"
@@ -1710,10 +1743,9 @@ def build_payload() -> dict:
     # then auto-discovered GeoJSON layers. Extra defs override discovery labels
     # for the same flat field (e.g. Flowminder short-trip outflow snapshots).
     extra_layers = [
-        {"group": group, "id": lid, "label": label, "field": field,
-         "palette": palette, "scale": scale, "source": "",
-         "legend_round": legend_round}
-        for (group, lid, label, field, palette, scale, legend_round) in EXTRA_LAYER_DEFS
+        _make_layer_def(group, lid, label, field, palette, scale, legend_round, epicenter_highlight)
+        for (group, lid, label, field, palette, scale, legend_round, epicenter_highlight)
+        in EXTRA_LAYER_DEFS
     ]
     extra_fields = {layer["field"] for layer in extra_layers}
     discovered_layers = [
@@ -1776,6 +1808,8 @@ def build_payload() -> dict:
         "geometry": {"type": "FeatureCollection", "features": features},
         "zone_data": zone_data,
         "layers": layers,
+        "epicenter_noms": list(EPICENTER_SOURCE_NOMS),
+        "epicenter_fill": EPICENTER_FILL,
         "projection_mask": {
             "layers": sorted(PROJECTION_MASK_LAYERS),
             "field": PROJECTION_MASK_FIELD,
@@ -2103,6 +2137,7 @@ HTML_TEMPLATE = r"""<!doctype html>
   select, button { background:#222; color:#eee; border:1px solid #444; padding:4px 6px; border-radius:4px; font-size:12px; }
   label { display:block; margin-top:6px; font-size:12px; color:#bbb; }
   .swatch { display:inline-block; width:18px; height:12px; margin-right:6px; vertical-align:middle; border:1px solid #444; }
+  .swatch-no-data { background:transparent !important; border:1px dashed #888; }
   .legend-bar { display:block; width:240px; height:12px; }
   .legend-ticks { display:flex; justify-content:space-between; font-size:10px; color:#aaa; width:240px; margin-top:2px; }
   .legend-ticks span { display:inline-block; white-space:nowrap; }
@@ -2278,6 +2313,15 @@ const PAYLOAD = JSON.parse(document.getElementById("payload").textContent);
 const ZONE_DATA = PAYLOAD.zone_data;
 const LAYERS = PAYLOAD.layers;
 const TRAVEL_FROM = PAYLOAD.travel_from || "Mongbwalu";
+const EPICENTER_NOMS = new Set(PAYLOAD.epicenter_noms || []);
+const EPICENTER_FILL = PAYLOAD.epicenter_fill || "#9b7d4e";
+
+function layerEpicenterHighlight(layer) {
+  return !!(layer && layer.epicenter_highlight);
+}
+function isEpicenterZone(ref, layer) {
+  return layerEpicenterHighlight(layer) && EPICENTER_NOMS.has(ref);
+}
 
 document.getElementById("title-sub").innerHTML =
   "Latest " +
@@ -2456,13 +2500,13 @@ L.tileLayer("https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png", {
   subdomains: "abcd", maxZoom: 19
 }).addTo(map);
 
-const NO_DATA_FILL = "#dcd8d0";
 const ZERO_FILL    = "#c4bfb6";
 let currentValues = new Map();
 let currentDomain = {min:0, max:1, isLog:true, palette:OUTBREAK};
 
 function recompute() {
   const layer = getLayer(layerSelect.value);
+  const highlightEpicenter = layerEpicenterHighlight(layer);
   currentValues.clear();
   const positives = [];
   let lo = Infinity, hi = -Infinity;
@@ -2471,8 +2515,13 @@ function recompute() {
     const zone = ZONE_DATA[ref];
     if (!zone) continue;
     const v = valueForZone(zone, layer);
-    if (v == null || Number.isNaN(v)) continue;
+    if (v == null || Number.isNaN(v)) {
+      if (!highlightEpicenter || !isEpicenterZone(ref, layer)) continue;
+      currentValues.set(ref, v);
+      continue;
+    }
     currentValues.set(ref, v);
+    if (highlightEpicenter && isEpicenterZone(ref, layer)) continue;
     if (v < lo) lo = v;
     if (v > hi) hi = v;
     if (v > 0) positives.push(v);
@@ -2494,8 +2543,8 @@ function recompute() {
   updateLayerMeta(layer);
 }
 
-function valueToColor(v) {
-  if (v == null || Number.isNaN(v)) return NO_DATA_FILL;
+function valueToColor(v, ref, layer) {
+  if (isEpicenterZone(ref, layer)) return EPICENTER_FILL;
   const d = currentDomain;
   if (d.isLog && v <= 0) return ZERO_FILL;
   let t;
@@ -2510,15 +2559,25 @@ function styleFn(feature) {
   const ref = feature.properties.nom;
   const v = currentValues.get(ref);
   const has = v != null && !Number.isNaN(v);
-  const isZero = has && (currentDomain.isLog ? v <= 0 : v === 0);
   const layer = getLayer(layerSelect.value);
+  if (isEpicenterZone(ref, layer)) {
+    return {
+      color: "#111", weight: 0.5,
+      fillColor: EPICENTER_FILL,
+      fillOpacity: 0.88
+    };
+  }
+  if (!has) {
+    return { color: "#111", weight: 0.35, fillOpacity: 0 };
+  }
   const isOutbreak = layer && layer.palette === "outbreak";
   const dataOpacity = isOutbreak ? 0.72 : 0.85;
   const mutedOpacity = isOutbreak ? 0.48 : 0.55;
+  const isZero = currentDomain.isLog ? v <= 0 : v === 0;
   return {
     color:"#111", weight:0.35,
-    fillColor: valueToColor(v),
-    fillOpacity: (!has || isZero) ? mutedOpacity : dataOpacity
+    fillColor: valueToColor(v, ref, layer),
+    fillOpacity: isZero ? mutedOpacity : dataOpacity
   };
 }
 
@@ -2565,9 +2624,16 @@ function updateLegend(layer) {
     "<span>" + fmtLegend(hi,  lr) + "</span>";
   document.getElementById("legend-scale").textContent =
     currentDomain.isLog ? "(log scale)" : "(linear scale)";
-  document.getElementById("legend-gray").innerHTML =
-    "<span class='swatch' style='background:" + ZERO_FILL + "'></span>zero · " +
-    "<span class='swatch' style='background:" + NO_DATA_FILL + "'></span>no data";
+  var grayParts = [
+    "<span class='swatch' style='background:" + ZERO_FILL + "'></span>zero",
+    "<span class='swatch swatch-no-data'></span>no data"
+  ];
+  if (layerEpicenterHighlight(layer)) {
+    grayParts.push(
+      "<span class='swatch' style='background:" + EPICENTER_FILL + "'></span>epicenter"
+    );
+  }
+  document.getElementById("legend-gray").innerHTML = grayParts.join(" · ");
 }
 
 function infoHTML(feature) {
