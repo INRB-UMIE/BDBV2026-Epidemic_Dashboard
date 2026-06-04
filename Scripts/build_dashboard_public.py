@@ -53,6 +53,9 @@ import base64
 import json
 import os
 import re
+import ssl
+import urllib.error
+import urllib.request
 from datetime import datetime
 from pathlib import Path
 
@@ -98,8 +101,23 @@ SIMPLIFY_TOL = 0.001     # ~110 m at the equator; ~10× fewer vertices than raw
 COORD_DECIMALS = 5
 TRAVEL_FROM_ZONE = "Mongbwalu"
 ASOF_FALLBACK = ""
-INSP_FALLBACK_URL = "https://insp.cd/"
+INSP_BASE_URL = "https://insp.cd/"
+INSP_FALLBACK_URL = INSP_BASE_URL
 LATEST_SITREP_JSON = SIT_REPS_DIR / "latest_sitrep.json"
+INSP_FETCH_TIMEOUT_S = float(os.environ.get("INSP_FETCH_TIMEOUT", "25"))
+INSP_FETCH_USER_AGENT = "BDBV2026-Dashboard-Build/1.0"
+# Set INSP_SITREP_FETCH=0 to skip live INSP requests (offline / reproducible builds).
+INSP_SITREP_FETCH = os.environ.get("INSP_SITREP_FETCH", "1").strip().lower() not in (
+    "0", "false", "no", "off",
+)
+
+# Slugs for the Bundibugyo Ebola sitrep series on insp.cd (not generic MVE carousel pages).
+_SITREP_SLUG_MODERN_RE = re.compile(r"sitrep-n(\d{1,3})-(mvb|mve)_", re.I)
+_SITREP_SLUG_LEGACY_RE = re.compile(r"sitrep-mve-n-(\d{1,3})-(\d{4})", re.I)
+_INSP_SITREP_PATH_RE = re.compile(
+    r"(?:https?://(?:www\.)?insp\.cd)?(/sitrep-[\w-]+/?)",
+    re.I,
+)
 
 # Maps metadata CSV names → build GeoJSON nom values where they differ.
 _NAME_TO_NOM = {
@@ -183,6 +201,182 @@ def _format_asof(d: datetime.date) -> str:
     return d.strftime("%d %b %Y").lstrip("0")
 
 
+def _parse_csv_stem_date(stem: str) -> datetime.date | None:
+    """Parse ``YYYY-MM-DD`` from Epidemiological Data CSV filenames."""
+    try:
+        return datetime.strptime(stem, "%Y-%m-%d").date()
+    except ValueError:
+        return None
+
+
+def _insp_live_fetch_enabled() -> bool:
+    return INSP_SITREP_FETCH
+
+
+def _insp_http_get(url: str) -> str | None:
+    """GET *url*; return response body text or None on failure."""
+    req = urllib.request.Request(
+        url,
+        headers={"User-Agent": INSP_FETCH_USER_AGENT, "Accept": "*/*"},
+    )
+    try:
+        with urllib.request.urlopen(
+            req, timeout=INSP_FETCH_TIMEOUT_S, context=ssl.create_default_context(),
+        ) as resp:
+            encoding = resp.headers.get_content_charset() or "utf-8"
+            return resp.read().decode(encoding, errors="replace")
+    except (urllib.error.URLError, TimeoutError, OSError) as exc:
+        print(f"  NOTE: INSP fetch failed for {url}: {exc}")
+        return None
+
+
+def _normalize_insp_sitrep_url(path_or_url: str) -> str | None:
+    """Return a canonical https://insp.cd/.../ URL for a sitrep path or slug."""
+    s = path_or_url.strip()
+    if not s:
+        return None
+    if s.startswith("http"):
+        base = s.rstrip("/") + "/"
+        if "insp.cd" not in base.lower():
+            return None
+        return base
+    if not s.startswith("/"):
+        s = "/" + s
+    slug = s.strip("/").split("?")[0].split("#")[0]
+    if not slug.lower().startswith("sitrep-"):
+        return None
+    return f"{INSP_BASE_URL}{slug}/"
+
+
+def _sitrep_num_from_slug(slug: str) -> int | None:
+    slug = slug.strip("/").lower()
+    m = _SITREP_SLUG_MODERN_RE.search(slug)
+    if m:
+        return int(m.group(1))
+    m = _SITREP_SLUG_LEGACY_RE.search(slug)
+    if m:
+        return int(m.group(1))
+    return None
+
+
+def _is_bdbv_insp_sitrep_slug(slug: str) -> bool:
+    """True for Bundibugyo Ebola sitrep permalinks (excludes unrelated MVE pages)."""
+    s = slug.strip("/").lower()
+    if _SITREP_SLUG_MODERN_RE.search(s):
+        return True
+    m = _SITREP_SLUG_LEGACY_RE.search(s)
+    # Legacy ``sitrep-mve-n-NNN-YYYY`` is shared with other diseases; keep high numbers.
+    return m is not None and int(m.group(1)) >= 8
+
+
+def _collect_insp_sitrep_urls_from_text(text: str) -> dict[int, str]:
+    """Extract sitrep URLs keyed by sitrep number (highest wins per number)."""
+    found: dict[int, str] = {}
+    for m in _INSP_SITREP_PATH_RE.finditer(text):
+        url = _normalize_insp_sitrep_url(m.group(1))
+        if not url:
+            continue
+        slug = url[len(INSP_BASE_URL):].strip("/")
+        if not _is_bdbv_insp_sitrep_slug(slug):
+            continue
+        num = _sitrep_num_from_slug(slug)
+        if num is None:
+            continue
+        found[num] = url
+    return found
+
+
+def _fetch_insp_sitrep_urls_wp() -> dict[int, str]:
+    """WordPress REST API: recent posts whose slug matches the Ebola sitrep series."""
+    urls = (
+        f"{INSP_BASE_URL}wp-json/wp/v2/posts"
+        f"?search=SitRep&per_page=50&orderby=date&order=desc",
+        f"{INSP_BASE_URL}wp-json/wp/v2/posts"
+        f"?search=MVB&per_page=30&orderby=date&order=desc",
+    )
+    found: dict[int, str] = {}
+    for api_url in urls:
+        body = _insp_http_get(api_url)
+        if not body:
+            continue
+        try:
+            posts = json.loads(body)
+        except json.JSONDecodeError:
+            continue
+        if not isinstance(posts, list):
+            continue
+        for post in posts:
+            if not isinstance(post, dict):
+                continue
+            slug = str(post.get("slug") or "")
+            link = post.get("link")
+            if not _is_bdbv_insp_sitrep_slug(slug):
+                continue
+            num = _sitrep_num_from_slug(slug)
+            if num is None:
+                continue
+            url = _normalize_insp_sitrep_url(str(link) if link else slug)
+            if url:
+                found[num] = url
+    return found
+
+
+def _fetch_insp_sitrep_urls_homepage() -> dict[int, str]:
+    body = _insp_http_get(INSP_BASE_URL)
+    if not body:
+        return {}
+    return _collect_insp_sitrep_urls_from_text(body)
+
+
+def _pick_latest_sitrep_url(candidates: dict[int, str]) -> str | None:
+    if not candidates:
+        return None
+    # Prefer MVB (current Bundibugyo naming); else highest sitrep number.
+    for num in sorted(candidates, reverse=True):
+        slug = candidates[num][len(INSP_BASE_URL):].strip("/").lower()
+        if "-mvb_" in slug:
+            return candidates[num]
+    best_num = max(candidates)
+    return candidates[best_num]
+
+
+def fetch_latest_insp_sitrep_url() -> str | None:
+    """Live INSP lookup: WordPress API, then homepage HTML scrape."""
+    merged: dict[int, str] = {}
+    for source, fetcher in (
+        ("wp-json", _fetch_insp_sitrep_urls_wp),
+        ("homepage", _fetch_insp_sitrep_urls_homepage),
+    ):
+        found = fetcher()
+        if found:
+            print(f"  INSP sitrep fetch ({source}): "
+                  f"#{max(found)} among {len(found)} candidate(s)")
+            merged.update(found)
+    return _pick_latest_sitrep_url(merged)
+
+
+def _latest_insp_url_from_local() -> str | None:
+    """Offline fallbacks: optional pointer file, then raw PDF filenames."""
+    if LATEST_SITREP_JSON.exists():
+        try:
+            url = json.loads(LATEST_SITREP_JSON.read_text()).get("url")
+            if isinstance(url, str) and url.strip():
+                return url.strip()
+        except Exception:
+            pass
+    raw_dir = EXTERNAL_DATA / "insp_sitrep" / "raw"
+    if raw_dir.exists():
+        nums = []
+        for p in raw_dir.glob("SitRep_MVE_*-*.pdf"):
+            m = re.search(r"SitRep_MVE_(\d+)-(\d+)", p.stem)
+            if m:
+                nums.append((int(m.group(1)), int(m.group(2))))
+        if nums:
+            num, year = max(nums)
+            return f"{INSP_BASE_URL}sitrep-mve-n-{num:03d}-{year}/"
+    return None
+
+
 def detect_asof() -> str:
     """Derive the 'latest case report' date.
     Checks local sit-rep CSVs first, then falls back to _date fields in the
@@ -192,7 +386,7 @@ def detect_asof() -> str:
         for p in SIT_REPS_DIR.iterdir():
             if not p.is_file() or p.suffix.lower() != ".csv":
                 continue
-            d = _parse_date(p.stem)
+            d = _parse_csv_stem_date(p.stem)
             if d is not None:
                 dated.append((d, p))
         if dated:
@@ -215,25 +409,19 @@ def detect_asof() -> str:
 
 
 def latest_insp_url() -> str:
-    """Derive the latest INSP sitrep URL from the build's raw PDFs,
-    falling back to local pointer file or INSP root."""
-    raw_dir = EXTERNAL_DATA / "insp_sitrep" / "raw"
-    if raw_dir.exists():
-        nums = []
-        for p in raw_dir.glob("SitRep_MVE_*-*.pdf"):
-            m = re.search(r"SitRep_MVE_(\d+)-(\d+)", p.stem)
-            if m:
-                nums.append((int(m.group(1)), int(m.group(2))))
-        if nums:
-            num, year = max(nums)
-            return f"https://insp.cd/sitrep-mve-n-{num:03d}-{year}/"
-    if LATEST_SITREP_JSON.exists():
-        try:
-            url = json.loads(LATEST_SITREP_JSON.read_text()).get("url")
-            if isinstance(url, str) and url:
-                return url
-        except Exception:
-            pass
+    """Latest INSP sitrep permalink: live fetch, then local overrides, then INSP home."""
+    if _insp_live_fetch_enabled():
+        live = fetch_latest_insp_sitrep_url()
+        if live:
+            print(f"  insp sitrep URL (live): {live}")
+            return live
+        print("  WARNING: live INSP sitrep fetch found no URL; using local fallbacks")
+    else:
+        print("  NOTE: INSP live sitrep fetch disabled (INSP_SITREP_FETCH=0)")
+    local = _latest_insp_url_from_local()
+    if local:
+        print(f"  insp sitrep URL (local): {local}")
+        return local
     return INSP_FALLBACK_URL
 
 
@@ -1644,8 +1832,6 @@ HTML_TEMPLATE = r"""<!doctype html>
   body.view-trends #legend,
   body.view-trends #info { display:none !important; }
   body.view-trends #trends { display:block; }
-  body.view-trends #title-disclaimer,
-  body.view-context #title-disclaimer,
   body.view-trends #imperial-model-estimates,
   body.view-context #imperial-model-estimates,
   body.view-trends .tracker-countries,
@@ -1995,7 +2181,6 @@ HTML_TEMPLATE = r"""<!doctype html>
 <div id="title" class="panel">
   <h1>DRC Ebola Bundibugyo 2026</h1>
   <div class="sub" id="title-sub"></div>
-  <div class="sub" id="title-disclaimer">Case Data From INSP - All Underlying Data Have Been Released Publicly</div>
   <div id="tracker"></div>
   <div class="sub" id="imperial-model-estimates"></div>
   <div style="margin-top:4px">
