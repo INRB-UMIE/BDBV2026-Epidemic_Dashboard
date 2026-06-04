@@ -53,7 +53,10 @@ import base64
 import json
 import os
 import re
-from datetime import datetime
+import ssl
+import urllib.error
+import urllib.request
+from datetime import date, datetime
 from pathlib import Path
 
 import numpy as np
@@ -97,9 +100,27 @@ THEME_CSS        = BRANDING_DIR / "dashboard-theme.css"
 SIMPLIFY_TOL = 0.001     # ~110 m at the equator; ~10× fewer vertices than raw
 COORD_DECIMALS = 5
 TRAVEL_FROM_ZONE = "Mongbwalu"
+# Canonical ``nom`` values for outbreak epicentres (Flowminder outflow sources).
+EPICENTER_SOURCE_NOMS = ("Bunia", "Mongbalu", "Rwampara")
+EPICENTER_FILL = "#7695E1"
 ASOF_FALLBACK = ""
-INSP_FALLBACK_URL = "https://insp.cd/"
+INSP_BASE_URL = "https://insp.cd/"
+INSP_FALLBACK_URL = INSP_BASE_URL
 LATEST_SITREP_JSON = SIT_REPS_DIR / "latest_sitrep.json"
+INSP_FETCH_TIMEOUT_S = float(os.environ.get("INSP_FETCH_TIMEOUT", "25"))
+INSP_FETCH_USER_AGENT = "BDBV2026-Dashboard-Build/1.0"
+# Set INSP_SITREP_FETCH=0 to skip live INSP requests (offline / reproducible builds).
+INSP_SITREP_FETCH = os.environ.get("INSP_SITREP_FETCH", "1").strip().lower() not in (
+    "0", "false", "no", "off",
+)
+
+# Slugs for the Bundibugyo Ebola sitrep series on insp.cd (not generic MVE carousel pages).
+_SITREP_SLUG_MODERN_RE = re.compile(r"sitrep-n(\d{1,3})-(mvb|mve)_", re.I)
+_SITREP_SLUG_LEGACY_RE = re.compile(r"sitrep-mve-n-(\d{1,3})-(\d{4})", re.I)
+_INSP_SITREP_PATH_RE = re.compile(
+    r"(?:https?://(?:www\.)?insp\.cd)?(/sitrep-[\w-]+/?)",
+    re.I,
+)
 
 # Maps metadata CSV names → build GeoJSON nom values where they differ.
 _NAME_TO_NOM = {
@@ -183,6 +204,182 @@ def _format_asof(d: datetime.date) -> str:
     return d.strftime("%d %b %Y").lstrip("0")
 
 
+def _parse_csv_stem_date(stem: str) -> datetime.date | None:
+    """Parse ``YYYY-MM-DD`` from Epidemiological Data CSV filenames."""
+    try:
+        return datetime.strptime(stem, "%Y-%m-%d").date()
+    except ValueError:
+        return None
+
+
+def _insp_live_fetch_enabled() -> bool:
+    return INSP_SITREP_FETCH
+
+
+def _insp_http_get(url: str) -> str | None:
+    """GET *url*; return response body text or None on failure."""
+    req = urllib.request.Request(
+        url,
+        headers={"User-Agent": INSP_FETCH_USER_AGENT, "Accept": "*/*"},
+    )
+    try:
+        with urllib.request.urlopen(
+            req, timeout=INSP_FETCH_TIMEOUT_S, context=ssl.create_default_context(),
+        ) as resp:
+            encoding = resp.headers.get_content_charset() or "utf-8"
+            return resp.read().decode(encoding, errors="replace")
+    except (urllib.error.URLError, TimeoutError, OSError) as exc:
+        print(f"  NOTE: INSP fetch failed for {url}: {exc}")
+        return None
+
+
+def _normalize_insp_sitrep_url(path_or_url: str) -> str | None:
+    """Return a canonical https://insp.cd/.../ URL for a sitrep path or slug."""
+    s = path_or_url.strip()
+    if not s:
+        return None
+    if s.startswith("http"):
+        base = s.rstrip("/") + "/"
+        if "insp.cd" not in base.lower():
+            return None
+        return base
+    if not s.startswith("/"):
+        s = "/" + s
+    slug = s.strip("/").split("?")[0].split("#")[0]
+    if not slug.lower().startswith("sitrep-"):
+        return None
+    return f"{INSP_BASE_URL}{slug}/"
+
+
+def _sitrep_num_from_slug(slug: str) -> int | None:
+    slug = slug.strip("/").lower()
+    m = _SITREP_SLUG_MODERN_RE.search(slug)
+    if m:
+        return int(m.group(1))
+    m = _SITREP_SLUG_LEGACY_RE.search(slug)
+    if m:
+        return int(m.group(1))
+    return None
+
+
+def _is_bdbv_insp_sitrep_slug(slug: str) -> bool:
+    """True for Bundibugyo Ebola sitrep permalinks (excludes unrelated MVE pages)."""
+    s = slug.strip("/").lower()
+    if _SITREP_SLUG_MODERN_RE.search(s):
+        return True
+    m = _SITREP_SLUG_LEGACY_RE.search(s)
+    # Legacy ``sitrep-mve-n-NNN-YYYY`` is shared with other diseases; keep high numbers.
+    return m is not None and int(m.group(1)) >= 8
+
+
+def _collect_insp_sitrep_urls_from_text(text: str) -> dict[int, str]:
+    """Extract sitrep URLs keyed by sitrep number (highest wins per number)."""
+    found: dict[int, str] = {}
+    for m in _INSP_SITREP_PATH_RE.finditer(text):
+        url = _normalize_insp_sitrep_url(m.group(1))
+        if not url:
+            continue
+        slug = url[len(INSP_BASE_URL):].strip("/")
+        if not _is_bdbv_insp_sitrep_slug(slug):
+            continue
+        num = _sitrep_num_from_slug(slug)
+        if num is None:
+            continue
+        found[num] = url
+    return found
+
+
+def _fetch_insp_sitrep_urls_wp() -> dict[int, str]:
+    """WordPress REST API: recent posts whose slug matches the Ebola sitrep series."""
+    urls = (
+        f"{INSP_BASE_URL}wp-json/wp/v2/posts"
+        f"?search=SitRep&per_page=50&orderby=date&order=desc",
+        f"{INSP_BASE_URL}wp-json/wp/v2/posts"
+        f"?search=MVB&per_page=30&orderby=date&order=desc",
+    )
+    found: dict[int, str] = {}
+    for api_url in urls:
+        body = _insp_http_get(api_url)
+        if not body:
+            continue
+        try:
+            posts = json.loads(body)
+        except json.JSONDecodeError:
+            continue
+        if not isinstance(posts, list):
+            continue
+        for post in posts:
+            if not isinstance(post, dict):
+                continue
+            slug = str(post.get("slug") or "")
+            link = post.get("link")
+            if not _is_bdbv_insp_sitrep_slug(slug):
+                continue
+            num = _sitrep_num_from_slug(slug)
+            if num is None:
+                continue
+            url = _normalize_insp_sitrep_url(str(link) if link else slug)
+            if url:
+                found[num] = url
+    return found
+
+
+def _fetch_insp_sitrep_urls_homepage() -> dict[int, str]:
+    body = _insp_http_get(INSP_BASE_URL)
+    if not body:
+        return {}
+    return _collect_insp_sitrep_urls_from_text(body)
+
+
+def _pick_latest_sitrep_url(candidates: dict[int, str]) -> str | None:
+    if not candidates:
+        return None
+    # Prefer MVB (current Bundibugyo naming); else highest sitrep number.
+    for num in sorted(candidates, reverse=True):
+        slug = candidates[num][len(INSP_BASE_URL):].strip("/").lower()
+        if "-mvb_" in slug:
+            return candidates[num]
+    best_num = max(candidates)
+    return candidates[best_num]
+
+
+def fetch_latest_insp_sitrep_url() -> str | None:
+    """Live INSP lookup: WordPress API, then homepage HTML scrape."""
+    merged: dict[int, str] = {}
+    for source, fetcher in (
+        ("wp-json", _fetch_insp_sitrep_urls_wp),
+        ("homepage", _fetch_insp_sitrep_urls_homepage),
+    ):
+        found = fetcher()
+        if found:
+            print(f"  INSP sitrep fetch ({source}): "
+                  f"#{max(found)} among {len(found)} candidate(s)")
+            merged.update(found)
+    return _pick_latest_sitrep_url(merged)
+
+
+def _latest_insp_url_from_local() -> str | None:
+    """Offline fallbacks: optional pointer file, then raw PDF filenames."""
+    if LATEST_SITREP_JSON.exists():
+        try:
+            url = json.loads(LATEST_SITREP_JSON.read_text()).get("url")
+            if isinstance(url, str) and url.strip():
+                return url.strip()
+        except Exception:
+            pass
+    raw_dir = EXTERNAL_DATA / "insp_sitrep" / "raw"
+    if raw_dir.exists():
+        nums = []
+        for p in raw_dir.glob("SitRep_MVE_*-*.pdf"):
+            m = re.search(r"SitRep_MVE_(\d+)-(\d+)", p.stem)
+            if m:
+                nums.append((int(m.group(1)), int(m.group(2))))
+        if nums:
+            num, year = max(nums)
+            return f"{INSP_BASE_URL}sitrep-mve-n-{num:03d}-{year}/"
+    return None
+
+
 def detect_asof() -> str:
     """Derive the 'latest case report' date.
     Checks local sit-rep CSVs first, then falls back to _date fields in the
@@ -192,7 +389,7 @@ def detect_asof() -> str:
         for p in SIT_REPS_DIR.iterdir():
             if not p.is_file() or p.suffix.lower() != ".csv":
                 continue
-            d = _parse_date(p.stem)
+            d = _parse_csv_stem_date(p.stem)
             if d is not None:
                 dated.append((d, p))
         if dated:
@@ -215,25 +412,19 @@ def detect_asof() -> str:
 
 
 def latest_insp_url() -> str:
-    """Derive the latest INSP sitrep URL from the build's raw PDFs,
-    falling back to local pointer file or INSP root."""
-    raw_dir = EXTERNAL_DATA / "insp_sitrep" / "raw"
-    if raw_dir.exists():
-        nums = []
-        for p in raw_dir.glob("SitRep_MVE_*-*.pdf"):
-            m = re.search(r"SitRep_MVE_(\d+)-(\d+)", p.stem)
-            if m:
-                nums.append((int(m.group(1)), int(m.group(2))))
-        if nums:
-            num, year = max(nums)
-            return f"https://insp.cd/sitrep-mve-n-{num:03d}-{year}/"
-    if LATEST_SITREP_JSON.exists():
-        try:
-            url = json.loads(LATEST_SITREP_JSON.read_text()).get("url")
-            if isinstance(url, str) and url:
-                return url
-        except Exception:
-            pass
+    """Latest INSP sitrep permalink: live fetch, then local overrides, then INSP home."""
+    if _insp_live_fetch_enabled():
+        live = fetch_latest_insp_sitrep_url()
+        if live:
+            print(f"  insp sitrep URL (live): {live}")
+            return live
+        print("  WARNING: live INSP sitrep fetch found no URL; using local fallbacks")
+    else:
+        print("  NOTE: INSP live sitrep fetch disabled (INSP_SITREP_FETCH=0)")
+    local = _latest_insp_url_from_local()
+    if local:
+        print(f"  insp sitrep URL (local): {local}")
+        return local
     return INSP_FALLBACK_URL
 
 
@@ -639,6 +830,164 @@ def load_dashboard_plots() -> dict | None:
         "series": manifest.get("series") or [],
         "plots": plots,
     }
+
+
+# ---------------------------------------------------------------------------
+# Public health response context (INSP SitRep pillars → Context tab)
+# ---------------------------------------------------------------------------
+
+_PHR_DATASET = "public_health_response"
+_PHR_NON_TEXT = {"ND", "NA", ""}
+
+_PHR_ZONE_METRICS = (
+    "epidemiological_coordination",
+    "epidemiological_monitoring",
+    "epidemiological_management",
+    "epidemiological_laboratory",
+    "epidemiological_infection_prevention_controle",
+    "epidemiological_logistics",
+    "epidemiological_security",
+    "epidemiological_community_engagement",
+    "epidemiological_protection_sexual_exploitation_abuse",
+)
+_PHR_NATIONAL_METRICS = tuple(f"national_{m}" for m in _PHR_ZONE_METRICS)
+
+_PHR_METRIC_LABELS: dict[str, str] = {
+    "epidemiological_coordination": "Coordination",
+    "epidemiological_monitoring": "Surveillance & monitoring",
+    "epidemiological_management": "Case management",
+    "epidemiological_laboratory": "Laboratory",
+    "epidemiological_infection_prevention_controle": "Infection prevention & control",
+    "epidemiological_logistics": "Logistics",
+    "epidemiological_security": "Security",
+    "epidemiological_community_engagement": "Community engagement",
+    "epidemiological_protection_sexual_exploitation_abuse": (
+        "Protection from sexual exploitation & abuse"
+    ),
+}
+
+
+def _phr_metric_label(metric: str) -> str:
+    key = metric.removeprefix("national_")
+    return _PHR_METRIC_LABELS.get(key, _prettify_label(key))
+
+
+def _phr_category(metric: str) -> str:
+    """Stable pillar slug for CSS category styling (strip national_ prefix)."""
+    return metric.removeprefix("national_")
+
+
+def _parse_phr_date(value) -> datetime.date | None:
+    """Parse PHR ``_date`` values (ISO, slash forms, and INSP ``DD-MM-YYYY``)."""
+    if value is None:
+        return None
+    s = str(value).strip()
+    if not s:
+        return None
+    if len(s) >= 10 and s[2:3] == "-" and s[5:6] == "-":
+        try:
+            return datetime.strptime(s[:10], "%d-%m-%Y").date()
+        except ValueError:
+            pass
+    return _parse_sitrep_date(s)
+
+
+def _sort_phr_pillars(pillars: list[dict]) -> list[dict]:
+    """Newest ``date`` first; pillar label breaks ties. Ignores pillar metric order."""
+    return sorted(
+        pillars,
+        key=lambda p: (
+            _parse_phr_date(p.get("date")) or date.min,
+            p.get("label") or "",
+        ),
+        reverse=True,
+    )
+
+
+def _extract_phr_block(block: object) -> tuple[str | None, str | None]:
+    """Return (narrative text, date string) from one GeoJSON metric object."""
+    if not isinstance(block, dict):
+        return None, None
+    date_raw = block.get("_date")
+    date = str(date_raw).strip() if date_raw not in (None, "") else None
+    text = None
+    for key, val in block.items():
+        if key == "_date":
+            continue
+        if val is None:
+            continue
+        s = str(val).strip()
+        if s and s not in _PHR_NON_TEXT:
+            text = s
+            break
+    return text, date
+
+
+def load_public_health_context() -> dict:
+    """Extract INSP pillar narratives from the build GeoJSON for the Context tab.
+
+    National rollup metrics are stored once (identical on every zone). Zone-level
+    metrics are keyed by canonical ``nom`` and only included when non-empty.
+    """
+    empty = {"national": [], "by_nom": {}}
+    if not BUILD_GEOJSON.exists():
+        print(f"  NOTE: {BUILD_GEOJSON.name} not found; context tab unavailable")
+        return empty
+
+    props_by_nom = _load_build_geojson_properties()
+    if not props_by_nom:
+        return empty
+
+    sample_phr = (next(iter(props_by_nom.values())).get(_PHR_DATASET) or {})
+    if not isinstance(sample_phr, dict) or not sample_phr:
+        print(f"  NOTE: no {_PHR_DATASET} block in build GeoJSON; context tab empty")
+        return empty
+
+    national: list[dict] = []
+    for metric in _PHR_NATIONAL_METRICS:
+        text, date = _extract_phr_block(sample_phr.get(metric))
+        if not text:
+            continue
+        parsed = _parse_phr_date(date)
+        national.append({
+            "metric": metric,
+            "category": _phr_category(metric),
+            "label": _phr_metric_label(metric),
+            "text": text,
+            "date": date,
+            "date_iso": parsed.isoformat() if parsed else None,
+            "scope": "national",
+        })
+    national = _sort_phr_pillars(national)
+
+    by_nom: dict[str, list[dict]] = {}
+    for nom, props in props_by_nom.items():
+        phr = props.get(_PHR_DATASET) or {}
+        if not isinstance(phr, dict):
+            continue
+        pillars: list[dict] = []
+        for metric in _PHR_ZONE_METRICS:
+            text, date = _extract_phr_block(phr.get(metric))
+            if not text:
+                continue
+            parsed = _parse_phr_date(date)
+            pillars.append({
+                "metric": metric,
+                "category": _phr_category(metric),
+                "label": _phr_metric_label(metric),
+                "text": text,
+                "date": date,
+                "date_iso": parsed.isoformat() if parsed else None,
+                "scope": "zone",
+            })
+        if pillars:
+            by_nom[nom] = _sort_phr_pillars(pillars)
+
+    print(
+        f"  public health context: {len(national)} national pillar(s), "
+        f"{len(by_nom)} zone(s) with local narrative"
+    )
+    return {"national": national, "by_nom": by_nom}
 
 
 # ---------------------------------------------------------------------------
@@ -1236,6 +1585,7 @@ def discover_geojson_layers(
         palette = gcfg.get("palette", "viridis")
         scale = gcfg.get("scale", "log")
         legend_round = gcfg.get("legend_round", "int")
+        epicenter_highlight = bool(gcfg.get("epicenter_highlight", False))
         for flat, mkey, lkey, label in groups[gkey]:
             layer_id = f"{gkey}::{mkey}"
             if lkey != mkey:
@@ -1249,6 +1599,7 @@ def discover_geojson_layers(
                 "scale": scale,
                 "source": "",
                 "legend_round": legend_round,
+                "epicenter_highlight": epicenter_highlight,
             })
             field_paths[flat] = [gkey, mkey, lkey]
 
@@ -1283,8 +1634,8 @@ def extract_geojson_fields(
 
 # Flowminder short-trip cohort proportions (Bunia / Mongbalu / Rwampara).
 # Flat field names match build GeoJSON: flowminder_short_trips.<metric>.<metric>.
+# Tuple: group, id, label, field, palette, scale, legend_round, epicenter_highlight
 _FLOWMINDER_SHORT_TRIPS_LAYER_DEFS = [
-    # (group, layer_id, label, field, palette, scale, legend_round)
     (
         "Incoming Mobility",
         "fmst::20260430",
@@ -1293,6 +1644,7 @@ _FLOWMINDER_SHORT_TRIPS_LAYER_DEFS = [
         "reds",
         "log",
         1,
+        True,
     ),
     (
         "Incoming Mobility",
@@ -1302,6 +1654,7 @@ _FLOWMINDER_SHORT_TRIPS_LAYER_DEFS = [
         "reds",
         "log",
         1,
+        True,
     ),
     (
         "Incoming Mobility",
@@ -1311,6 +1664,7 @@ _FLOWMINDER_SHORT_TRIPS_LAYER_DEFS = [
         "reds",
         "log",
         1,
+        True,
     ),
     (
         "Incoming Mobility",
@@ -1320,6 +1674,7 @@ _FLOWMINDER_SHORT_TRIPS_LAYER_DEFS = [
         "reds",
         "log",
         1,
+        True,
     ),
     (
         "Incoming Mobility",
@@ -1329,23 +1684,47 @@ _FLOWMINDER_SHORT_TRIPS_LAYER_DEFS = [
         "reds",
         "log",
         1,
+        True,
     ),
 ]
 
 EXTRA_LAYER_DEFS = [
-    # (group, layer_id, label, field, palette, scale, legend_round)
-    ("Observed (epi update)", "obs::total",     "Total cases (confirmed + suspected)", "total_cases",      "reds", "log", "int"),
-    ("Observed (epi update)", "obs::confirmed", "Confirmed cases",                     "confirmed_cases",  "reds", "log", "int"),
-    ("Observed (epi update)", "obs::suspected", "Suspected cases",                     "suspected_cases",  "reds", "log", "int"),
-    ("Observed (epi update)", "obs::conf_d",    "Confirmed deaths",                    "confirmed_deaths", "reds", "log", "int"),
-    ("Observed (epi update)", "obs::susp_d",    "Suspected deaths",                    "suspected_deaths", "reds", "log", "int"),
-    ("Modeled projection",    "cal::true",      "Relative risk",                       "relative_risk",    "outbreak", "log", 2),
-    ("Incoming Mobility",     "disp::in",       "Incoming displaced persons (12mo)",   "displaced_in_individuals_12mo", "reds", "log", "int"),
-    ("Incoming Mobility",     "flow::in",       "Flowminder incoming relocations (March 2026)",          "flowminder_in_mar2026",         "reds", "log", "int"),
-    ("Distance from Mongbwalu","d::travel",      "Travel time from Mongbwalu (hours)",   "travel_time_to_mongbwalu_h",    "plasma_r", "linear", 1),
-    ("Distance from Mongbwalu","d::geo",         "Road distance from Mongbwalu (km)",    "geodesic_to_mongbwalu_km",      "plasma_r", "linear", "int"),
+    ("Observed (epi update)", "obs::total",     "Total cases (confirmed + suspected)", "total_cases",      "reds", "log", "int", False),
+    ("Observed (epi update)", "obs::confirmed", "Confirmed cases",                     "confirmed_cases",  "reds", "log", "int", False),
+    ("Observed (epi update)", "obs::suspected", "Suspected cases",                     "suspected_cases",  "reds", "log", "int", False),
+    ("Observed (epi update)", "obs::conf_d",    "Confirmed deaths",                    "confirmed_deaths", "reds", "log", "int", False),
+    ("Observed (epi update)", "obs::susp_d",    "Suspected deaths",                    "suspected_deaths", "reds", "log", "int", False),
+    ("Modeled projection",    "cal::true",      "Relative risk",                       "relative_risk",    "outbreak", "log", 2, False),
+    ("Incoming Mobility",     "disp::in",       "Incoming displaced persons (12mo)",   "displaced_in_individuals_12mo", "reds", "log", "int", False),
+    ("Incoming Mobility",     "flow::in",       "Flowminder incoming relocations (March 2026)",          "flowminder_in_mar2026",         "reds", "log", "int", True),
+    ("Distance from Mongbwalu","d::travel",      "Travel time from Mongbwalu (hours)",   "travel_time_to_mongbwalu_h",    "plasma_r", "linear", 1, False),
+    ("Distance from Mongbwalu","d::geo",         "Road distance from Mongbwalu (km)",    "geodesic_to_mongbwalu_km",      "plasma_r", "linear", "int", False),
     *_FLOWMINDER_SHORT_TRIPS_LAYER_DEFS,
 ]
+
+
+def _make_layer_def(
+    group: str,
+    layer_id: str,
+    label: str,
+    field: str,
+    palette: str,
+    scale: str,
+    legend_round,
+    epicenter_highlight: bool = False,
+    source: str = "",
+) -> dict:
+    return {
+        "group": group,
+        "id": layer_id,
+        "label": label,
+        "field": field,
+        "palette": palette,
+        "scale": scale,
+        "source": source,
+        "legend_round": legend_round,
+        "epicenter_highlight": epicenter_highlight,
+    }
 
 PROJECTION_MASK_LAYERS = {"cal::true"}
 PROJECTION_MASK_FIELD = "relative_risk"
@@ -1396,10 +1775,9 @@ def build_payload() -> dict:
     # then auto-discovered GeoJSON layers. Extra defs override discovery labels
     # for the same flat field (e.g. Flowminder short-trip outflow snapshots).
     extra_layers = [
-        {"group": group, "id": lid, "label": label, "field": field,
-         "palette": palette, "scale": scale, "source": "",
-         "legend_round": legend_round}
-        for (group, lid, label, field, palette, scale, legend_round) in EXTRA_LAYER_DEFS
+        _make_layer_def(group, lid, label, field, palette, scale, legend_round, epicenter_highlight)
+        for (group, lid, label, field, palette, scale, legend_round, epicenter_highlight)
+        in EXTRA_LAYER_DEFS
     ]
     extra_fields = {layer["field"] for layer in extra_layers}
     discovered_layers = [
@@ -1449,6 +1827,7 @@ def build_payload() -> dict:
     print(f"  province boundaries: {len(province_boundaries['features'])} provinces")
 
     onset_trends = load_dashboard_plots()
+    phr_context = load_public_health_context()
 
     asof = detect_asof()
     print(f"  asof: {asof}")
@@ -1461,6 +1840,8 @@ def build_payload() -> dict:
         "geometry": {"type": "FeatureCollection", "features": features},
         "zone_data": zone_data,
         "layers": layers,
+        "epicenter_noms": list(EPICENTER_SOURCE_NOMS),
+        "epicenter_fill": EPICENTER_FILL,
         "projection_mask": {
             "layers": sorted(PROJECTION_MASK_LAYERS),
             "field": PROJECTION_MASK_FIELD,
@@ -1476,6 +1857,7 @@ def build_payload() -> dict:
         "active_case_markers": active_case_markers,
         "province_boundaries": province_boundaries,
         "onset_trends": onset_trends,
+        "phr_context": phr_context,
     }
 
 
@@ -1516,6 +1898,31 @@ HTML_TEMPLATE = r"""<!doctype html>
   body.view-trends #legend,
   body.view-trends #info { display:none !important; }
   body.view-trends #trends { display:block; }
+  body.view-trends #imperial-model-estimates,
+  body.view-context #imperial-model-estimates,
+  body.view-trends .tracker-countries,
+  body.view-context .tracker-countries,
+  body.view-trends .tracker-footnotes,
+  body.view-context .tracker-footnotes { display:none !important; }
+  body.view-trends #title,
+  body.view-context #title {
+    padding:8px 12px;
+    min-width:min(420px, calc(100vw - 24px));
+  }
+  body.view-trends #title h1,
+  body.view-context #title h1 { margin-bottom:2px; font-size:clamp(15px, 2.8vw, 20px); }
+  body.view-trends #title .sub,
+  body.view-context #title .sub { font-size:10px; }
+  body.view-trends #tracker,
+  body.view-context #tracker {
+    margin-top:4px;
+    padding-top:4px;
+    border-top-width:1px;
+  }
+  body.view-trends #tracker .global-row,
+  body.view-context #tracker .global-row { gap:clamp(12px, 4vw, 28px); }
+  body.view-trends #tracker .global-cell .num,
+  body.view-context #tracker .global-cell .num { font-size:clamp(18px, 4.5vw, 26px); }
   body.view-trends.trends-province-hovered #trends {
     width:min(480px, calc(100vw - 16px));
     max-width:min(480px, calc(100vw - 16px));
@@ -1534,7 +1941,8 @@ HTML_TEMPLATE = r"""<!doctype html>
   }
   .view-tab:hover { background:#333; color:#eee; }
   .view-tab.active { color:#ffd28a; border-color:#ffae42; background:#2a2418; }
-  #trends-hint {
+  #trends-hint,
+  #context-hint {
     position:absolute; z-index:900;
     top:50%; left:50%; transform:translate(-50%, -50%);
     pointer-events:none; color:#aaa;
@@ -1550,6 +1958,60 @@ HTML_TEMPLATE = r"""<!doctype html>
   body.view-trends #trends-hint { display:flex; }
   body.view-trends.trends-province-hovered #trends-hint { display:none; }
   #trends-body.trends-empty { color:#888; font-size:12px; }
+  #context-national {
+    top:12px; left:12px; bottom:auto; right:auto;
+    width:min(280px, calc(50vw - 24px));
+    max-width:280px;
+    max-height:40vh;
+    overflow:hidden; display:none;
+    flex-direction:column;
+    box-sizing:border-box;
+  }
+  #context {
+    top:12px; right:12px; bottom:auto; left:auto;
+    width:min(280px, calc(50vw - 24px));
+    max-width:280px;
+    max-height:80vh;
+    overflow:hidden; display:none;
+    flex-direction:column;
+    box-sizing:border-box;
+  }
+  body.view-context #controls,
+  body.view-context #legend,
+  body.view-context #info { display:none !important; }
+  body.view-context #context-national,
+  body.view-context #context { display:flex; }
+  #context-national .panel-header,
+  #context .panel-header { flex:0 0 auto; }
+  #context-national-body,
+  #context-body {
+    flex:1 1 auto;
+    min-height:0;
+    overflow-y:auto;
+    -webkit-overflow-scrolling:touch;
+  }
+  body.view-context #context-hint { display:flex; }
+  body.view-context.context-zone-hovered #context-hint { display:none; }
+  #context-body.context-empty,
+  #context-national-body.context-empty { color:#888; font-size:12px; }
+  .context-pillar { margin:0 0 12px 0; padding-left:10px; border-left:3px solid #555; }
+  .context-pillar h4 { margin:0 0 4px 0; color:#c4c4c4; }
+  .context-pillar .context-meta { font-size:10px; color:#6e6e6e; margin-bottom:4px; }
+  .context-pillar .context-meta .scope-tag {
+    display:inline-block; margin-right:6px; padding:1px 5px;
+    border-radius:3px; background:#2a2a2a; color:#999; text-transform:uppercase;
+    letter-spacing:0.4px; font-size:9px;
+  }
+  .context-pillar p { margin:0; color:#959595; line-height:1.45; font-size:12px; }
+  .context-pillar.pillar-epidemiological-coordination { border-left-color:#9fcdfb; }
+  .context-pillar.pillar-epidemiological-monitoring { border-left-color:#5dade2; }
+  .context-pillar.pillar-epidemiological-management { border-left-color:#ffae42; }
+  .context-pillar.pillar-epidemiological-laboratory { border-left-color:#bb8fce; }
+  .context-pillar.pillar-epidemiological-infection-prevention-controle { border-left-color:#48c9b0; }
+  .context-pillar.pillar-epidemiological-logistics { border-left-color:#e67e22; }
+  .context-pillar.pillar-epidemiological-security { border-left-color:#ec7063; }
+  .context-pillar.pillar-epidemiological-community-engagement { border-left-color:#58d68d; }
+  .context-pillar.pillar-epidemiological-protection-sexual-exploitation-abuse { border-left-color:#c39bd3; }
   .onset-chart-wrap { width:100%; margin-top:4px; }
   .onset-chart-wrap svg { width:100%; max-width:100%; height:auto; display:block; }
   @media (min-width: 1024px) {
@@ -1586,6 +2048,18 @@ HTML_TEMPLATE = r"""<!doctype html>
     #trends         { width:min(520px, calc(100vw - 12px)); max-width:min(520px, calc(100vw - 12px));
                       right:6px;
                       bottom:calc(8px + clamp(40px, 12vw, 72px) + 8px); }
+    body.view-context #context-national {
+      top:clamp(128px, 24vh, 200px);
+      left:6px; bottom:auto;
+      width:min(260px, calc(50vw - 12px));
+      max-width:min(260px, 46vw);
+    }
+    body.view-context #context {
+      top:clamp(128px, 24vh, 200px);
+      right:6px; bottom:auto;
+      width:min(260px, calc(50vw - 12px));
+      max-width:min(260px, 46vw);
+    }
     #legend         { max-width:60vw; }
     #controls       { top:clamp(150px, 28vh, 240px); }
     #info           { top:clamp(150px, 28vh, 240px); }
@@ -1605,6 +2079,8 @@ HTML_TEMPLATE = r"""<!doctype html>
     #info           { max-height:70vh; }
     #legend         { max-height:60vh; bottom:56px; }
     #trends         { max-height:min(55vh, calc(100vh - 180px)); }
+    body.view-context #context-national { max-height:min(28vh, calc(50vh - 80px)); }
+    body.view-context #context { max-height:min(55vh, calc(100vh - 200px)); }
     #partners      { bottom:8px; right:6px; padding:2px 3px; gap:2px;
                       width:auto; max-width:min(38vw, 260px); }
     #partners a    { flex:0 0 calc(50% - 1px); }
@@ -1693,6 +2169,7 @@ HTML_TEMPLATE = r"""<!doctype html>
   select, button { background:#222; color:#eee; border:1px solid #444; padding:4px 6px; border-radius:4px; font-size:12px; }
   label { display:block; margin-top:6px; font-size:12px; color:#bbb; }
   .swatch { display:inline-block; width:18px; height:12px; margin-right:6px; vertical-align:middle; border:1px solid #444; }
+  .swatch-no-data { background:transparent !important; border:1px dashed #888; }
   .legend-bar { display:block; width:240px; height:12px; }
   .legend-ticks { display:flex; justify-content:space-between; font-size:10px; color:#aaa; width:240px; margin-top:2px; }
   .legend-ticks span { display:inline-block; white-space:nowrap; }
@@ -1707,8 +2184,9 @@ HTML_TEMPLATE = r"""<!doctype html>
   .footer { font-size:10px; color:#888; margin-top:8px; }
   .checkbox-row { display:flex; align-items:center; margin-top:6px; gap:6px; }
   .case-icon { width:14px; height:14px; border-radius:50%; background:rgba(91,134,179,0.85); border:1.5px solid #fff; box-shadow:0 0 6px rgba(91,134,179,0.45); }
-  /* Trends view: let province hover drive the plot; dots must not steal pointer events. */
-  body.view-trends .leaflet-marker-pane .leaflet-marker-icon { pointer-events: none !important; }
+  /* Trends / Context: marker dots must not steal pointer events from the map. */
+  body.view-trends .leaflet-marker-pane .leaflet-marker-icon,
+  body.view-context .leaflet-marker-pane .leaflet-marker-icon { pointer-events: none !important; }
   h4 { margin: 8px 0 2px 0; font-size: 12px; color: #ffd28a; font-weight: 600; }
   .link-btn {
     display:inline-block; margin-top:4px; padding:2px 8px;
@@ -1765,11 +2243,11 @@ HTML_TEMPLATE = r"""<!doctype html>
 <body class="view-map">
 <div id="map"></div>
 <div id="trends-hint">Hover over a province to see trends</div>
+<div id="context-hint">Click a health zone to see response context</div>
 <div id="partners"></div>
 <div id="title" class="panel">
   <h1>DRC Ebola Bundibugyo 2026</h1>
   <div class="sub" id="title-sub"></div>
-  <div class="sub" id="title-disclaimer">Case Data From INSP - All Underlying Data Have Been Released Publicly</div>
   <div id="tracker"></div>
   <div class="sub" id="imperial-model-estimates"></div>
   <div style="margin-top:4px">
@@ -1835,6 +2313,7 @@ HTML_TEMPLATE = r"""<!doctype html>
   <div id="view-tabs" class="view-tabs">
     <button type="button" class="view-tab active" data-view="map">Current snapshot</button>
     <button type="button" class="view-tab" data-view="trends">Trends</button>
+    <button type="button" class="view-tab" data-view="context">Context</button>
   </div>
 </div>
 <div id="trends" class="panel">
@@ -1844,6 +2323,20 @@ HTML_TEMPLATE = r"""<!doctype html>
   </div>
   <div id="trends-body" class="panel-body trends-empty"></div>
 </div>
+<div id="context-national" class="panel">
+  <div class="panel-header">
+    <strong>National response</strong>
+    <button class="panel-toggle" data-target="context-national" type="button" aria-label="Toggle national context panel" title="Collapse / expand national context">−</button>
+  </div>
+  <div id="context-national-body" class="panel-body context-empty"></div>
+</div>
+<div id="context" class="panel">
+  <div class="panel-header">
+    <strong id="context-title">Health zone context</strong>
+    <button class="panel-toggle" data-target="context" type="button" aria-label="Toggle health zone context panel" title="Collapse / expand zone context">−</button>
+  </div>
+  <div id="context-body" class="panel-body context-empty">Click a health zone on the map.</div>
+</div>
 
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script id="payload" type="application/json">__PAYLOAD__</script>
@@ -1852,6 +2345,15 @@ const PAYLOAD = JSON.parse(document.getElementById("payload").textContent);
 const ZONE_DATA = PAYLOAD.zone_data;
 const LAYERS = PAYLOAD.layers;
 const TRAVEL_FROM = PAYLOAD.travel_from || "Mongbwalu";
+const EPICENTER_NOMS = new Set(PAYLOAD.epicenter_noms || []);
+const EPICENTER_FILL = PAYLOAD.epicenter_fill || "#9b7d4e";
+
+function layerEpicenterHighlight(layer) {
+  return !!(layer && layer.epicenter_highlight);
+}
+function isEpicenterZone(ref, layer) {
+  return layerEpicenterHighlight(layer) && EPICENTER_NOMS.has(ref);
+}
 
 document.getElementById("title-sub").innerHTML =
   "Latest " +
@@ -1915,7 +2417,7 @@ document.getElementById("title-sub").innerHTML =
         "</div>" +
       "</div>" +
     "</div>" +
-    "<div class='countries-row'>" + (countryHTML || "<span class='sub'>—</span>") + "</div>" +
+    "<div class='countries-row tracker-countries'>" + (countryHTML || "<span class='sub'>—</span>") + "</div>" +
     footnotesHTML;
 })();
 
@@ -2030,13 +2532,13 @@ L.tileLayer("https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png", {
   subdomains: "abcd", maxZoom: 19
 }).addTo(map);
 
-const NO_DATA_FILL = "#dcd8d0";
 const ZERO_FILL    = "#c4bfb6";
 let currentValues = new Map();
 let currentDomain = {min:0, max:1, isLog:true, palette:OUTBREAK};
 
 function recompute() {
   const layer = getLayer(layerSelect.value);
+  const highlightEpicenter = layerEpicenterHighlight(layer);
   currentValues.clear();
   const positives = [];
   let lo = Infinity, hi = -Infinity;
@@ -2045,8 +2547,13 @@ function recompute() {
     const zone = ZONE_DATA[ref];
     if (!zone) continue;
     const v = valueForZone(zone, layer);
-    if (v == null || Number.isNaN(v)) continue;
+    if (v == null || Number.isNaN(v)) {
+      if (!highlightEpicenter || !isEpicenterZone(ref, layer)) continue;
+      currentValues.set(ref, v);
+      continue;
+    }
     currentValues.set(ref, v);
+    if (highlightEpicenter && isEpicenterZone(ref, layer)) continue;
     if (v < lo) lo = v;
     if (v > hi) hi = v;
     if (v > 0) positives.push(v);
@@ -2068,8 +2575,8 @@ function recompute() {
   updateLayerMeta(layer);
 }
 
-function valueToColor(v) {
-  if (v == null || Number.isNaN(v)) return NO_DATA_FILL;
+function valueToColor(v, ref, layer) {
+  if (isEpicenterZone(ref, layer)) return EPICENTER_FILL;
   const d = currentDomain;
   if (d.isLog && v <= 0) return ZERO_FILL;
   let t;
@@ -2084,15 +2591,25 @@ function styleFn(feature) {
   const ref = feature.properties.nom;
   const v = currentValues.get(ref);
   const has = v != null && !Number.isNaN(v);
-  const isZero = has && (currentDomain.isLog ? v <= 0 : v === 0);
   const layer = getLayer(layerSelect.value);
+  if (isEpicenterZone(ref, layer)) {
+    return {
+      color: "#111", weight: 0.5,
+      fillColor: EPICENTER_FILL,
+      fillOpacity: 0.88
+    };
+  }
+  if (!has) {
+    return { color: "#111", weight: 0.35, fillOpacity: 0 };
+  }
   const isOutbreak = layer && layer.palette === "outbreak";
   const dataOpacity = isOutbreak ? 0.72 : 0.85;
   const mutedOpacity = isOutbreak ? 0.48 : 0.55;
+  const isZero = currentDomain.isLog ? v <= 0 : v === 0;
   return {
     color:"#111", weight:0.35,
-    fillColor: valueToColor(v),
-    fillOpacity: (!has || isZero) ? mutedOpacity : dataOpacity
+    fillColor: valueToColor(v, ref, layer),
+    fillOpacity: isZero ? mutedOpacity : dataOpacity
   };
 }
 
@@ -2139,9 +2656,16 @@ function updateLegend(layer) {
     "<span>" + fmtLegend(hi,  lr) + "</span>";
   document.getElementById("legend-scale").textContent =
     currentDomain.isLog ? "(log scale)" : "(linear scale)";
-  document.getElementById("legend-gray").innerHTML =
-    "<span class='swatch' style='background:" + ZERO_FILL + "'></span>zero · " +
-    "<span class='swatch' style='background:" + NO_DATA_FILL + "'></span>no data";
+  var grayParts = [
+    "<span class='swatch' style='background:" + ZERO_FILL + "'></span>zero",
+    "<span class='swatch swatch-no-data'></span>no data"
+  ];
+  if (layerEpicenterHighlight(layer)) {
+    grayParts.push(
+      "<span class='swatch' style='background:" + EPICENTER_FILL + "'></span>epicenter"
+    );
+  }
+  document.getElementById("legend-gray").innerHTML = grayParts.join(" · ");
 }
 
 function infoHTML(feature) {
@@ -2212,6 +2736,9 @@ const geoLayer = L.geoJSON(PAYLOAD.geometry, {
           setTrendsProvinceHover(feature.properties.province || null);
           return;
         }
+        if (activeView === "context") {
+          return;
+        }
         e.target.setStyle({weight: 1.6, color: "#ffae42"});
         e.target.bringToFront();
         document.getElementById("info-body").className = "";
@@ -2224,12 +2751,29 @@ const geoLayer = L.geoJSON(PAYLOAD.geometry, {
           }, 40);
           return;
         }
+        if (activeView === "context") {
+          if (e.target !== contextSelectedLayer) {
+            geoLayer.resetStyle(e.target);
+          }
+          return;
+        }
         geoLayer.resetStyle(e.target);
       },
-      click: function(e) { map.fitBounds(e.target.getBounds(), {padding:[40,40]}); }
+      click: function(e) {
+        if (activeView === "context") {
+          L.DomEvent.stop(e);
+          selectContextZone(feature.properties.nom, e.target);
+          return;
+        }
+        map.fitBounds(e.target.getBounds(), {padding:[40,40]});
+      }
     });
   }
 }).addTo(map);
+
+map.on("click", function() {
+  if (activeView === "context") clearContextSelection();
+});
 
 // --- province outlines (Trends view) ---
 function themeVar(name, fallback) {
@@ -2306,6 +2850,188 @@ function setTrendsProvinceHover(province) {
   applyProvinceOutlineStyles(province || null);
 }
 
+function formatContextDate(raw) {
+  if (!raw) return "";
+  const s = String(raw).trim();
+  if (!s) return "";
+  if (s.length >= 10 && s[2] === "-" && s[5] === "-") {
+    const months = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+    const d = parseInt(s.slice(0, 2), 10);
+    const m = parseInt(s.slice(3, 5), 10);
+    const y = s.slice(6, 10);
+    if (m >= 1 && m <= 12 && d >= 1) {
+      return String(d) + " " + months[m - 1] + " " + y;
+    }
+  }
+  if (s.length >= 10 && s[4] === "-" && s[7] === "-") {
+    const parts = s.slice(0, 10).split("-");
+    const months = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+    const m = parseInt(parts[1], 10);
+    const d = parseInt(parts[2], 10);
+    if (m >= 1 && m <= 12 && d >= 1) {
+      return String(d) + " " + months[m - 1] + " " + parts[0];
+    }
+  }
+  if (s.indexOf("/") >= 0) {
+    const bits = s.split("/");
+    if (bits.length === 3) {
+      const a = parseInt(bits[0], 10), b = parseInt(bits[1], 10);
+      let y = parseInt(bits[2], 10);
+      if (y < 100) y += 2000;
+      const months = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+      const day = a > 12 ? a : b;
+      const month = a > 12 ? b : a;
+      if (month >= 1 && month <= 12) {
+        return String(day) + " " + months[month - 1] + " " + y;
+      }
+    }
+  }
+  return s;
+}
+
+function contextDateSortKey(pillar) {
+  if (pillar && pillar.date_iso) {
+    const t = Date.parse(pillar.date_iso);
+    if (!isNaN(t)) return t;
+  }
+  const raw = pillar ? pillar.date : null;
+  if (raw == null) return Number.NEGATIVE_INFINITY;
+  const s = String(raw).trim();
+  if (!s) return Number.NEGATIVE_INFINITY;
+  if (s.length >= 10 && s[2] === "-" && s[5] === "-") {
+    const d = parseInt(s.slice(0, 2), 10);
+    const m = parseInt(s.slice(3, 5), 10) - 1;
+    const y = parseInt(s.slice(6, 10), 10);
+    const t = Date.UTC(y, m, d);
+    if (!isNaN(t)) return t;
+  }
+  if (s.length >= 10 && s[4] === "-" && s[7] === "-") {
+    const t = Date.parse(s.slice(0, 10));
+    if (!isNaN(t)) return t;
+  }
+  if (s.indexOf("/") >= 0) {
+    const bits = s.split("/");
+    if (bits.length === 3) {
+      const a = parseInt(bits[0], 10), b = parseInt(bits[1], 10);
+      let y = parseInt(bits[2], 10);
+      if (y < 100) y += 2000;
+      const day = a > 12 ? a : b;
+      const month = (a > 12 ? b : a) - 1;
+      const t = Date.UTC(y, month, day);
+      if (!isNaN(t)) return t;
+    }
+  }
+  return Number.NEGATIVE_INFINITY;
+}
+
+function sortContextPillarsByDate(pillars) {
+  return pillars.slice().sort(function(a, b) {
+    const diff = contextDateSortKey(b) - contextDateSortKey(a);
+    if (diff !== 0) return diff;
+    return (a.label || "").localeCompare(b.label || "");
+  });
+}
+
+function phrPillarCategoryClass(pillar) {
+  const cat = pillar.category || (pillar.metric || "").replace(/^national_/, "");
+  if (!cat) return "";
+  return "pillar-" + cat.replace(/_/g, "-");
+}
+
+function renderContextPillarHtml(pillar, opts) {
+  opts = opts || {};
+  const catClass = phrPillarCategoryClass(pillar);
+  let meta = "";
+  if (!opts.hideScopeTag) {
+    const scopeLabel = pillar.scope === "national" ? "National" : "Health zone";
+    meta = "<span class='scope-tag'>" + escHtml(scopeLabel) + "</span>";
+  }
+  const dateStr = formatContextDate(pillar.date);
+  if (dateStr) meta += "<span>as of " + escHtml(dateStr) + "</span>";
+  const metaBlock = meta ? "<div class='context-meta'>" + meta + "</div>" : "";
+  return (
+    "<div class='context-pillar " + catClass + "'>" +
+      "<h4>" + escHtml(pillar.label) + "</h4>" +
+      metaBlock +
+      "<p>" + escHtml(pillar.text) + "</p>" +
+    "</div>"
+  );
+}
+
+function renderNationalContextPanel() {
+  const body = document.getElementById("context-national-body");
+  if (!body) return;
+  const national = (PAYLOAD.phr_context || {}).national || [];
+  if (!national.length) {
+    body.className = "panel-body context-empty";
+    body.innerHTML = "<p>No national SitRep pillar notes available.</p>";
+    return;
+  }
+  body.className = "panel-body";
+  body.innerHTML = sortContextPillarsByDate(national).map(function(p) {
+    return renderContextPillarHtml(p, {hideScopeTag: true});
+  }).join("");
+}
+
+function zoneDisplayName(nom) {
+  for (const feat of PAYLOAD.geometry.features) {
+    if (feat.properties.nom === nom) {
+      return feat.properties.name || nom;
+    }
+  }
+  return nom;
+}
+
+let contextSelectedNom = null;
+let contextSelectedLayer = null;
+
+function clearContextSelection() {
+  if (contextSelectedLayer) {
+    geoLayer.resetStyle(contextSelectedLayer);
+    contextSelectedLayer = null;
+  }
+  contextSelectedNom = null;
+  renderContextPanel(null);
+}
+
+function selectContextZone(nom, layer) {
+  if (!nom || !layer) return;
+  if (contextSelectedLayer && contextSelectedLayer !== layer) {
+    geoLayer.resetStyle(contextSelectedLayer);
+  }
+  contextSelectedNom = nom;
+  contextSelectedLayer = layer;
+  layer.setStyle({weight: 1.6, color: "#ffae42"});
+  layer.bringToFront();
+  renderContextPanel(nom);
+}
+
+function renderContextPanel(nom) {
+  const body = document.getElementById("context-body");
+  const title = document.getElementById("context-title");
+  if (!body) return;
+  document.body.classList.toggle("context-zone-hovered", !!nom);
+  body.scrollTop = 0;
+  if (!nom) {
+    if (title) title.textContent = "Health zone context";
+    body.className = "panel-body context-empty";
+    body.innerHTML = "<p>Click a health zone on the map.</p>";
+    return;
+  }
+  const zonePillars = ((PAYLOAD.phr_context || {}).by_nom || {})[nom] || [];
+  const displayName = zoneDisplayName(nom);
+  if (title) title.textContent = displayName;
+  if (!zonePillars.length) {
+    body.className = "panel-body context-empty";
+    body.innerHTML = "<p>No zone-specific SitRep notes for " + escHtml(displayName) + ".</p>";
+    return;
+  }
+  body.className = "panel-body";
+  body.innerHTML = sortContextPillarsByDate(zonePillars).map(function(p) {
+    return renderContextPillarHtml(p, {hideScopeTag: true});
+  }).join("");
+}
+
 function showProvinceOutlines() {
   if (!map.hasLayer(provinceOutlineLayer)) {
     provinceOutlineLayer.addTo(map);
@@ -2321,7 +3047,7 @@ function hideProvinceOutlines() {
   applyProvinceOutlineStyles(null);
 }
 
-// --- Map / Trends tab switching ---
+// --- Map / Trends / Context tab switching ---
 let activeView = "map";
 let trendsHoverTimer = null;
 let trendsHoveredProvince = null;
@@ -2334,8 +3060,19 @@ function setActiveView(view) {
     layerSelect.value = "obs::total";
     recompute();
     showProvinceOutlines();
+    clearContextSelection();
+  } else if (view === "context") {
+    hideProvinceOutlines();
+    renderTrendsPanel(null);
+    renderNationalContextPanel();
+    clearContextSelection();
+    if (savedMapLayerId && activeView === "trends") {
+      layerSelect.value = savedMapLayerId;
+      recompute();
+    }
   } else {
     hideProvinceOutlines();
+    clearContextSelection();
     if (savedMapLayerId) {
       layerSelect.value = savedMapLayerId;
       recompute();
@@ -2344,6 +3081,7 @@ function setActiveView(view) {
   activeView = view;
   document.body.classList.toggle("view-map", view === "map");
   document.body.classList.toggle("view-trends", view === "trends");
+  document.body.classList.toggle("view-context", view === "context");
   document.querySelectorAll(".view-tab").forEach(function(btn) {
     btn.classList.toggle("active", btn.dataset.view === view);
   });
