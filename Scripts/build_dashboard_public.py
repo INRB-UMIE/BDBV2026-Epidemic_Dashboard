@@ -642,6 +642,132 @@ def load_dashboard_plots() -> dict | None:
 
 
 # ---------------------------------------------------------------------------
+# Public health response context (INSP SitRep pillars → Context tab)
+# ---------------------------------------------------------------------------
+
+_PHR_DATASET = "public_health_response"
+_PHR_NON_TEXT = {"ND", "NA", ""}
+
+_PHR_ZONE_METRICS = (
+    "epidemiological_coordination",
+    "epidemiological_monitoring",
+    "epidemiological_management",
+    "epidemiological_laboratory",
+    "epidemiological_infection_prevention_controle",
+    "epidemiological_logistics",
+    "epidemiological_security",
+    "epidemiological_community_engagement",
+    "epidemiological_protection_sexual_exploitation_abuse",
+)
+_PHR_NATIONAL_METRICS = tuple(f"national_{m}" for m in _PHR_ZONE_METRICS)
+
+_PHR_METRIC_LABELS: dict[str, str] = {
+    "epidemiological_coordination": "Coordination",
+    "epidemiological_monitoring": "Surveillance & monitoring",
+    "epidemiological_management": "Case management",
+    "epidemiological_laboratory": "Laboratory",
+    "epidemiological_infection_prevention_controle": "Infection prevention & control",
+    "epidemiological_logistics": "Logistics",
+    "epidemiological_security": "Security",
+    "epidemiological_community_engagement": "Community engagement",
+    "epidemiological_protection_sexual_exploitation_abuse": (
+        "Protection from sexual exploitation & abuse"
+    ),
+}
+
+
+def _phr_metric_label(metric: str) -> str:
+    key = metric.removeprefix("national_")
+    return _PHR_METRIC_LABELS.get(key, _prettify_label(key))
+
+
+def _phr_category(metric: str) -> str:
+    """Stable pillar slug for CSS category styling (strip national_ prefix)."""
+    return metric.removeprefix("national_")
+
+
+def _extract_phr_block(block: object) -> tuple[str | None, str | None]:
+    """Return (narrative text, date string) from one GeoJSON metric object."""
+    if not isinstance(block, dict):
+        return None, None
+    date_raw = block.get("_date")
+    date = str(date_raw).strip() if date_raw not in (None, "") else None
+    text = None
+    for key, val in block.items():
+        if key == "_date":
+            continue
+        if val is None:
+            continue
+        s = str(val).strip()
+        if s and s not in _PHR_NON_TEXT:
+            text = s
+            break
+    return text, date
+
+
+def load_public_health_context() -> dict:
+    """Extract INSP pillar narratives from the build GeoJSON for the Context tab.
+
+    National rollup metrics are stored once (identical on every zone). Zone-level
+    metrics are keyed by canonical ``nom`` and only included when non-empty.
+    """
+    empty = {"national": [], "by_nom": {}}
+    if not BUILD_GEOJSON.exists():
+        print(f"  NOTE: {BUILD_GEOJSON.name} not found; context tab unavailable")
+        return empty
+
+    props_by_nom = _load_build_geojson_properties()
+    if not props_by_nom:
+        return empty
+
+    sample_phr = (next(iter(props_by_nom.values())).get(_PHR_DATASET) or {})
+    if not isinstance(sample_phr, dict) or not sample_phr:
+        print(f"  NOTE: no {_PHR_DATASET} block in build GeoJSON; context tab empty")
+        return empty
+
+    national: list[dict] = []
+    for metric in _PHR_NATIONAL_METRICS:
+        text, date = _extract_phr_block(sample_phr.get(metric))
+        if not text:
+            continue
+        national.append({
+            "metric": metric,
+            "category": _phr_category(metric),
+            "label": _phr_metric_label(metric),
+            "text": text,
+            "date": date,
+            "scope": "national",
+        })
+
+    by_nom: dict[str, list[dict]] = {}
+    for nom, props in props_by_nom.items():
+        phr = props.get(_PHR_DATASET) or {}
+        if not isinstance(phr, dict):
+            continue
+        pillars: list[dict] = []
+        for metric in _PHR_ZONE_METRICS:
+            text, date = _extract_phr_block(phr.get(metric))
+            if not text:
+                continue
+            pillars.append({
+                "metric": metric,
+                "category": _phr_category(metric),
+                "label": _phr_metric_label(metric),
+                "text": text,
+                "date": date,
+                "scope": "zone",
+            })
+        if pillars:
+            by_nom[nom] = pillars
+
+    print(
+        f"  public health context: {len(national)} national pillar(s), "
+        f"{len(by_nom)} zone(s) with local narrative"
+    )
+    return {"national": national, "by_nom": by_nom}
+
+
+# ---------------------------------------------------------------------------
 # per-zone payload
 # ---------------------------------------------------------------------------
 
@@ -1449,6 +1575,7 @@ def build_payload() -> dict:
     print(f"  province boundaries: {len(province_boundaries['features'])} provinces")
 
     onset_trends = load_dashboard_plots()
+    phr_context = load_public_health_context()
 
     asof = detect_asof()
     print(f"  asof: {asof}")
@@ -1476,6 +1603,7 @@ def build_payload() -> dict:
         "active_case_markers": active_case_markers,
         "province_boundaries": province_boundaries,
         "onset_trends": onset_trends,
+        "phr_context": phr_context,
     }
 
 
@@ -1516,6 +1644,33 @@ HTML_TEMPLATE = r"""<!doctype html>
   body.view-trends #legend,
   body.view-trends #info { display:none !important; }
   body.view-trends #trends { display:block; }
+  body.view-trends #title-disclaimer,
+  body.view-context #title-disclaimer,
+  body.view-trends #imperial-model-estimates,
+  body.view-context #imperial-model-estimates,
+  body.view-trends .tracker-countries,
+  body.view-context .tracker-countries,
+  body.view-trends .tracker-footnotes,
+  body.view-context .tracker-footnotes { display:none !important; }
+  body.view-trends #title,
+  body.view-context #title {
+    padding:8px 12px;
+    min-width:min(420px, calc(100vw - 24px));
+  }
+  body.view-trends #title h1,
+  body.view-context #title h1 { margin-bottom:2px; font-size:clamp(15px, 2.8vw, 20px); }
+  body.view-trends #title .sub,
+  body.view-context #title .sub { font-size:10px; }
+  body.view-trends #tracker,
+  body.view-context #tracker {
+    margin-top:4px;
+    padding-top:4px;
+    border-top-width:1px;
+  }
+  body.view-trends #tracker .global-row,
+  body.view-context #tracker .global-row { gap:clamp(12px, 4vw, 28px); }
+  body.view-trends #tracker .global-cell .num,
+  body.view-context #tracker .global-cell .num { font-size:clamp(18px, 4.5vw, 26px); }
   body.view-trends.trends-province-hovered #trends {
     width:min(480px, calc(100vw - 16px));
     max-width:min(480px, calc(100vw - 16px));
@@ -1534,7 +1689,8 @@ HTML_TEMPLATE = r"""<!doctype html>
   }
   .view-tab:hover { background:#333; color:#eee; }
   .view-tab.active { color:#ffd28a; border-color:#ffae42; background:#2a2418; }
-  #trends-hint {
+  #trends-hint,
+  #context-hint {
     position:absolute; z-index:900;
     top:50%; left:50%; transform:translate(-50%, -50%);
     pointer-events:none; color:#aaa;
@@ -1550,6 +1706,60 @@ HTML_TEMPLATE = r"""<!doctype html>
   body.view-trends #trends-hint { display:flex; }
   body.view-trends.trends-province-hovered #trends-hint { display:none; }
   #trends-body.trends-empty { color:#888; font-size:12px; }
+  #context-national {
+    top:12px; left:12px; bottom:auto; right:auto;
+    width:min(280px, calc(50vw - 24px));
+    max-width:280px;
+    max-height:40vh;
+    overflow:hidden; display:none;
+    flex-direction:column;
+    box-sizing:border-box;
+  }
+  #context {
+    top:12px; right:12px; bottom:auto; left:auto;
+    width:min(280px, calc(50vw - 24px));
+    max-width:280px;
+    max-height:80vh;
+    overflow:hidden; display:none;
+    flex-direction:column;
+    box-sizing:border-box;
+  }
+  body.view-context #controls,
+  body.view-context #legend,
+  body.view-context #info { display:none !important; }
+  body.view-context #context-national,
+  body.view-context #context { display:flex; }
+  #context-national .panel-header,
+  #context .panel-header { flex:0 0 auto; }
+  #context-national-body,
+  #context-body {
+    flex:1 1 auto;
+    min-height:0;
+    overflow-y:auto;
+    -webkit-overflow-scrolling:touch;
+  }
+  body.view-context #context-hint { display:flex; }
+  body.view-context.context-zone-hovered #context-hint { display:none; }
+  #context-body.context-empty,
+  #context-national-body.context-empty { color:#888; font-size:12px; }
+  .context-pillar { margin:0 0 12px 0; padding-left:10px; border-left:3px solid #555; }
+  .context-pillar h4 { margin:0 0 4px 0; color:#c4c4c4; }
+  .context-pillar .context-meta { font-size:10px; color:#6e6e6e; margin-bottom:4px; }
+  .context-pillar .context-meta .scope-tag {
+    display:inline-block; margin-right:6px; padding:1px 5px;
+    border-radius:3px; background:#2a2a2a; color:#999; text-transform:uppercase;
+    letter-spacing:0.4px; font-size:9px;
+  }
+  .context-pillar p { margin:0; color:#959595; line-height:1.45; font-size:12px; }
+  .context-pillar.pillar-epidemiological-coordination { border-left-color:#9fcdfb; }
+  .context-pillar.pillar-epidemiological-monitoring { border-left-color:#5dade2; }
+  .context-pillar.pillar-epidemiological-management { border-left-color:#ffae42; }
+  .context-pillar.pillar-epidemiological-laboratory { border-left-color:#bb8fce; }
+  .context-pillar.pillar-epidemiological-infection-prevention-controle { border-left-color:#48c9b0; }
+  .context-pillar.pillar-epidemiological-logistics { border-left-color:#e67e22; }
+  .context-pillar.pillar-epidemiological-security { border-left-color:#ec7063; }
+  .context-pillar.pillar-epidemiological-community-engagement { border-left-color:#58d68d; }
+  .context-pillar.pillar-epidemiological-protection-sexual-exploitation-abuse { border-left-color:#c39bd3; }
   .onset-chart-wrap { width:100%; margin-top:4px; }
   .onset-chart-wrap svg { width:100%; max-width:100%; height:auto; display:block; }
   @media (min-width: 1024px) {
@@ -1586,6 +1796,18 @@ HTML_TEMPLATE = r"""<!doctype html>
     #trends         { width:min(520px, calc(100vw - 12px)); max-width:min(520px, calc(100vw - 12px));
                       right:6px;
                       bottom:calc(8px + clamp(40px, 12vw, 72px) + 8px); }
+    body.view-context #context-national {
+      top:clamp(128px, 24vh, 200px);
+      left:6px; bottom:auto;
+      width:min(260px, calc(50vw - 12px));
+      max-width:min(260px, 46vw);
+    }
+    body.view-context #context {
+      top:clamp(128px, 24vh, 200px);
+      right:6px; bottom:auto;
+      width:min(260px, calc(50vw - 12px));
+      max-width:min(260px, 46vw);
+    }
     #legend         { max-width:60vw; }
     #controls       { top:clamp(150px, 28vh, 240px); }
     #info           { top:clamp(150px, 28vh, 240px); }
@@ -1605,6 +1827,8 @@ HTML_TEMPLATE = r"""<!doctype html>
     #info           { max-height:70vh; }
     #legend         { max-height:60vh; bottom:56px; }
     #trends         { max-height:min(55vh, calc(100vh - 180px)); }
+    body.view-context #context-national { max-height:min(28vh, calc(50vh - 80px)); }
+    body.view-context #context { max-height:min(55vh, calc(100vh - 200px)); }
     #partners      { bottom:8px; right:6px; padding:2px 3px; gap:2px;
                       width:auto; max-width:min(38vw, 260px); }
     #partners a    { flex:0 0 calc(50% - 1px); }
@@ -1707,8 +1931,9 @@ HTML_TEMPLATE = r"""<!doctype html>
   .footer { font-size:10px; color:#888; margin-top:8px; }
   .checkbox-row { display:flex; align-items:center; margin-top:6px; gap:6px; }
   .case-icon { width:14px; height:14px; border-radius:50%; background:rgba(91,134,179,0.85); border:1.5px solid #fff; box-shadow:0 0 6px rgba(91,134,179,0.45); }
-  /* Trends view: let province hover drive the plot; dots must not steal pointer events. */
-  body.view-trends .leaflet-marker-pane .leaflet-marker-icon { pointer-events: none !important; }
+  /* Trends / Context: marker dots must not steal pointer events from the map. */
+  body.view-trends .leaflet-marker-pane .leaflet-marker-icon,
+  body.view-context .leaflet-marker-pane .leaflet-marker-icon { pointer-events: none !important; }
   h4 { margin: 8px 0 2px 0; font-size: 12px; color: #ffd28a; font-weight: 600; }
   .link-btn {
     display:inline-block; margin-top:4px; padding:2px 8px;
@@ -1765,6 +1990,7 @@ HTML_TEMPLATE = r"""<!doctype html>
 <body class="view-map">
 <div id="map"></div>
 <div id="trends-hint">Hover over a province to see trends</div>
+<div id="context-hint">Click a health zone to see response context</div>
 <div id="partners"></div>
 <div id="title" class="panel">
   <h1>DRC Ebola Bundibugyo 2026</h1>
@@ -1835,6 +2061,7 @@ HTML_TEMPLATE = r"""<!doctype html>
   <div id="view-tabs" class="view-tabs">
     <button type="button" class="view-tab active" data-view="map">Current snapshot</button>
     <button type="button" class="view-tab" data-view="trends">Trends</button>
+    <button type="button" class="view-tab" data-view="context">Context</button>
   </div>
 </div>
 <div id="trends" class="panel">
@@ -1843,6 +2070,20 @@ HTML_TEMPLATE = r"""<!doctype html>
     <button class="panel-toggle" data-target="trends" type="button" aria-label="Toggle trends panel" title="Collapse / expand trends">−</button>
   </div>
   <div id="trends-body" class="panel-body trends-empty"></div>
+</div>
+<div id="context-national" class="panel">
+  <div class="panel-header">
+    <strong>National response</strong>
+    <button class="panel-toggle" data-target="context-national" type="button" aria-label="Toggle national context panel" title="Collapse / expand national context">−</button>
+  </div>
+  <div id="context-national-body" class="panel-body context-empty"></div>
+</div>
+<div id="context" class="panel">
+  <div class="panel-header">
+    <strong id="context-title">Health zone context</strong>
+    <button class="panel-toggle" data-target="context" type="button" aria-label="Toggle health zone context panel" title="Collapse / expand zone context">−</button>
+  </div>
+  <div id="context-body" class="panel-body context-empty">Click a health zone on the map.</div>
 </div>
 
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
@@ -1915,7 +2156,7 @@ document.getElementById("title-sub").innerHTML =
         "</div>" +
       "</div>" +
     "</div>" +
-    "<div class='countries-row'>" + (countryHTML || "<span class='sub'>—</span>") + "</div>" +
+    "<div class='countries-row tracker-countries'>" + (countryHTML || "<span class='sub'>—</span>") + "</div>" +
     footnotesHTML;
 })();
 
@@ -2212,6 +2453,9 @@ const geoLayer = L.geoJSON(PAYLOAD.geometry, {
           setTrendsProvinceHover(feature.properties.province || null);
           return;
         }
+        if (activeView === "context") {
+          return;
+        }
         e.target.setStyle({weight: 1.6, color: "#ffae42"});
         e.target.bringToFront();
         document.getElementById("info-body").className = "";
@@ -2224,12 +2468,29 @@ const geoLayer = L.geoJSON(PAYLOAD.geometry, {
           }, 40);
           return;
         }
+        if (activeView === "context") {
+          if (e.target !== contextSelectedLayer) {
+            geoLayer.resetStyle(e.target);
+          }
+          return;
+        }
         geoLayer.resetStyle(e.target);
       },
-      click: function(e) { map.fitBounds(e.target.getBounds(), {padding:[40,40]}); }
+      click: function(e) {
+        if (activeView === "context") {
+          L.DomEvent.stop(e);
+          selectContextZone(feature.properties.nom, e.target);
+          return;
+        }
+        map.fitBounds(e.target.getBounds(), {padding:[40,40]});
+      }
     });
   }
 }).addTo(map);
+
+map.on("click", function() {
+  if (activeView === "context") clearContextSelection();
+});
 
 // --- province outlines (Trends view) ---
 function themeVar(name, fallback) {
@@ -2306,6 +2567,136 @@ function setTrendsProvinceHover(province) {
   applyProvinceOutlineStyles(province || null);
 }
 
+function formatContextDate(raw) {
+  if (!raw) return "";
+  const s = String(raw).trim();
+  if (!s) return "";
+  if (s.length >= 10 && s[4] === "-" && s[7] === "-") {
+    const parts = s.slice(0, 10).split("-");
+    const months = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+    const m = parseInt(parts[1], 10);
+    const d = parseInt(parts[2], 10);
+    if (m >= 1 && m <= 12 && d >= 1) {
+      return String(d) + " " + months[m - 1] + " " + parts[0];
+    }
+  }
+  if (s.indexOf("/") >= 0) {
+    const bits = s.split("/");
+    if (bits.length === 3) {
+      const a = parseInt(bits[0], 10), b = parseInt(bits[1], 10);
+      let y = parseInt(bits[2], 10);
+      if (y < 100) y += 2000;
+      const months = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+      const day = a > 12 ? a : b;
+      const month = a > 12 ? b : a;
+      if (month >= 1 && month <= 12) {
+        return String(day) + " " + months[month - 1] + " " + y;
+      }
+    }
+  }
+  return s;
+}
+
+function phrPillarCategoryClass(pillar) {
+  const cat = pillar.category || (pillar.metric || "").replace(/^national_/, "");
+  if (!cat) return "";
+  return "pillar-" + cat.replace(/_/g, "-");
+}
+
+function renderContextPillarHtml(pillar, opts) {
+  opts = opts || {};
+  const catClass = phrPillarCategoryClass(pillar);
+  let meta = "";
+  if (!opts.hideScopeTag) {
+    const scopeLabel = pillar.scope === "national" ? "National" : "Health zone";
+    meta = "<span class='scope-tag'>" + escHtml(scopeLabel) + "</span>";
+  }
+  const dateStr = formatContextDate(pillar.date);
+  if (dateStr) meta += "<span>as of " + escHtml(dateStr) + "</span>";
+  const metaBlock = meta ? "<div class='context-meta'>" + meta + "</div>" : "";
+  return (
+    "<div class='context-pillar " + catClass + "'>" +
+      "<h4>" + escHtml(pillar.label) + "</h4>" +
+      metaBlock +
+      "<p>" + escHtml(pillar.text) + "</p>" +
+    "</div>"
+  );
+}
+
+function renderNationalContextPanel() {
+  const body = document.getElementById("context-national-body");
+  if (!body) return;
+  const national = (PAYLOAD.phr_context || {}).national || [];
+  if (!national.length) {
+    body.className = "panel-body context-empty";
+    body.innerHTML = "<p>No national SitRep pillar notes available.</p>";
+    return;
+  }
+  body.className = "panel-body";
+  body.innerHTML = national.map(function(p) {
+    return renderContextPillarHtml(p, {hideScopeTag: true});
+  }).join("");
+}
+
+function zoneDisplayName(nom) {
+  for (const feat of PAYLOAD.geometry.features) {
+    if (feat.properties.nom === nom) {
+      return feat.properties.name || nom;
+    }
+  }
+  return nom;
+}
+
+let contextSelectedNom = null;
+let contextSelectedLayer = null;
+
+function clearContextSelection() {
+  if (contextSelectedLayer) {
+    geoLayer.resetStyle(contextSelectedLayer);
+    contextSelectedLayer = null;
+  }
+  contextSelectedNom = null;
+  renderContextPanel(null);
+}
+
+function selectContextZone(nom, layer) {
+  if (!nom || !layer) return;
+  if (contextSelectedLayer && contextSelectedLayer !== layer) {
+    geoLayer.resetStyle(contextSelectedLayer);
+  }
+  contextSelectedNom = nom;
+  contextSelectedLayer = layer;
+  layer.setStyle({weight: 1.6, color: "#ffae42"});
+  layer.bringToFront();
+  renderContextPanel(nom);
+}
+
+function renderContextPanel(nom) {
+  const body = document.getElementById("context-body");
+  const title = document.getElementById("context-title");
+  if (!body) return;
+  document.body.classList.toggle("context-zone-hovered", !!nom);
+  body.scrollTop = 0;
+  if (!nom) {
+    if (title) title.textContent = "Health zone context";
+    body.className = "panel-body context-empty";
+    body.innerHTML = "<p>Click a health zone on the map.</p>";
+    return;
+  }
+  const zonePillars = ((PAYLOAD.phr_context || {}).by_nom || {})[nom] || [];
+  const displayName = zoneDisplayName(nom);
+  if (title) title.textContent = displayName;
+  if (!zonePillars.length) {
+    body.className = "panel-body context-empty";
+    body.innerHTML = "<p>No zone-specific SitRep notes for " + escHtml(displayName) + ".</p>";
+    return;
+  }
+  body.className = "panel-body";
+  body.innerHTML = zonePillars.map(function(p) {
+    return renderContextPillarHtml(p, {hideScopeTag: true});
+  }).join("");
+}
+
 function showProvinceOutlines() {
   if (!map.hasLayer(provinceOutlineLayer)) {
     provinceOutlineLayer.addTo(map);
@@ -2321,7 +2712,7 @@ function hideProvinceOutlines() {
   applyProvinceOutlineStyles(null);
 }
 
-// --- Map / Trends tab switching ---
+// --- Map / Trends / Context tab switching ---
 let activeView = "map";
 let trendsHoverTimer = null;
 let trendsHoveredProvince = null;
@@ -2334,8 +2725,19 @@ function setActiveView(view) {
     layerSelect.value = "obs::total";
     recompute();
     showProvinceOutlines();
+    clearContextSelection();
+  } else if (view === "context") {
+    hideProvinceOutlines();
+    renderTrendsPanel(null);
+    renderNationalContextPanel();
+    clearContextSelection();
+    if (savedMapLayerId && activeView === "trends") {
+      layerSelect.value = savedMapLayerId;
+      recompute();
+    }
   } else {
     hideProvinceOutlines();
+    clearContextSelection();
     if (savedMapLayerId) {
       layerSelect.value = savedMapLayerId;
       recompute();
@@ -2344,6 +2746,7 @@ function setActiveView(view) {
   activeView = view;
   document.body.classList.toggle("view-map", view === "map");
   document.body.classList.toggle("view-trends", view === "trends");
+  document.body.classList.toggle("view-context", view === "context");
   document.querySelectorAll(".view-tab").forEach(function(btn) {
     btn.classList.toggle("active", btn.dataset.view === view);
   });

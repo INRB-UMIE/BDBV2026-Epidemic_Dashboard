@@ -206,7 +206,8 @@ h4 {
   background: rgba(155, 125, 78, 0.12) !important;
 }
 
-#trends-hint {
+#trends-hint,
+#context-hint {
   background: rgba(255, 255, 255, 0.92) !important;
   color: var(--muted) !important;
   border: 1px solid var(--border);
