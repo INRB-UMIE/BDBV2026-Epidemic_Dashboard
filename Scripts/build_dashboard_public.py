@@ -78,8 +78,10 @@ OUTPUT_PATH = OUTPUT_DIR / "dashboard.html"
 BUILD_DIR = Path(os.environ.get("BUILD_DIR") or
                  (SCRIPT_DIR.parent.parent / "BDBV2026-Data" / "build")).resolve()
 BUILD_GEOJSON    = BUILD_DIR / "drc_health_zones.geojson"
+BUILD_MANIFEST   = BUILD_DIR / "manifest.json"
 BUILD_LONG_DIR   = BUILD_DIR / "long"
 EXTERNAL_DATA    = BUILD_DIR.parent / "data"
+DATA_REPO        = os.environ.get("DATA_REPO", "INRB-UMIE/BDBV2026-Data").strip()
 
 METADATA_CSV     = DATA_ROOT / "health_zone_metadata.csv"
 IC_MODEL_CSV     = DATA_ROOT / "ic_model_estimates.csv"
@@ -1752,6 +1754,34 @@ def _sort_layers_for_dropdown(layers: list[dict]) -> list[dict]:
 # payload assembly
 # ---------------------------------------------------------------------------
 
+def load_data_build_info() -> dict | None:
+    """Data-repo release tag/URL from build/manifest.json (same tag as GitHub Releases)."""
+    if not BUILD_MANIFEST.exists():
+        print(f"  NOTE: {BUILD_MANIFEST} not found; data_build omitted from payload")
+        return None
+    try:
+        manifest = json.loads(BUILD_MANIFEST.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as e:
+        print(f"  WARNING: could not read {BUILD_MANIFEST.name}: {e}")
+        return None
+    built_at = manifest.get("built_at")
+    commit = manifest.get("commit")
+    if not built_at or not commit:
+        print(f"  WARNING: {BUILD_MANIFEST.name} missing built_at or commit")
+        return None
+    date_part = str(built_at).split("T", 1)[0]
+    tag = f"build-{date_part}-{commit}"
+    url = f"https://github.com/{DATA_REPO}/releases/tag/{tag}"
+    print(f"  data_build: {tag}")
+    return {
+        "repo": DATA_REPO,
+        "tag": tag,
+        "url": url,
+        "built_at": str(built_at),
+        "commit": str(commit),
+    }
+
+
 def build_payload() -> dict:
     print(f"BUILD_DIR  = {BUILD_DIR}")
     print(f"DATA_ROOT  = {DATA_ROOT}")
@@ -1831,12 +1861,14 @@ def build_payload() -> dict:
 
     asof = detect_asof()
     print(f"  asof: {asof}")
+    data_build = load_data_build_info()
 
     return {
         "asof": asof,
         "travel_from": TRAVEL_FROM_ZONE,
         "initial_view": initial_view,
         "insp_sitrep_url": latest_insp_url(),
+        "data_build": data_build,
         "geometry": {"type": "FeatureCollection", "features": features},
         "zone_data": zone_data,
         "layers": layers,
@@ -2355,11 +2387,21 @@ function isEpicenterZone(ref, layer) {
   return layerEpicenterHighlight(layer) && EPICENTER_NOMS.has(ref);
 }
 
-document.getElementById("title-sub").innerHTML =
-  "Latest " +
-  "<a href='" + (PAYLOAD.insp_sitrep_url || "https://insp.cd/") + "' target='_blank' rel='noopener' " +
-  "style='color:#9fcdfb;text-decoration:underline'>INSP Sit Rep</a>" +
-  " - " + PAYLOAD.asof;
+(function buildTitleSub() {
+  const linkStyle = "color:#9fcdfb;text-decoration:underline";
+  let html =
+    "Latest " +
+    "<a href='" + (PAYLOAD.insp_sitrep_url || "https://insp.cd/") + "' target='_blank' rel='noopener' " +
+    "style='" + linkStyle + "'>INSP Sit Rep</a>" +
+    " - " + PAYLOAD.asof;
+  const db = PAYLOAD.data_build;
+  if (db && db.url && db.tag) {
+    html +=
+      " · Built on release: <a href='" + db.url + "' target='_blank' rel='noopener' style='" + linkStyle + "'>" +
+       db.tag + "</a>";
+  }
+  document.getElementById("title-sub").innerHTML = html;
+})();
 
 // --- case-count tracker ---
 (function buildTracker() {
