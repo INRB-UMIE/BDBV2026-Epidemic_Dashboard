@@ -853,6 +853,7 @@ _PHR_ZONE_METRICS = (
     "epidemiological_protection_sexual_exploitation_abuse",
 )
 _PHR_NATIONAL_METRICS = tuple(f"national_{m}" for m in _PHR_ZONE_METRICS)
+_PHR_PROVINCIAL_METRICS = tuple(f"provincial_{m}" for m in _PHR_ZONE_METRICS)
 
 _PHR_METRIC_LABELS: dict[str, str] = {
     "epidemiological_coordination": "Coordination",
@@ -870,13 +871,21 @@ _PHR_METRIC_LABELS: dict[str, str] = {
 
 
 def _phr_metric_label(metric: str) -> str:
-    key = metric.removeprefix("national_")
+    key = metric.removeprefix("national_").removeprefix("provincial_")
     return _PHR_METRIC_LABELS.get(key, _prettify_label(key))
 
 
 def _phr_category(metric: str) -> str:
-    """Stable pillar slug for CSS category styling (strip national_ prefix)."""
-    return metric.removeprefix("national_")
+    """Stable pillar slug for CSS category styling (strip roll-up prefixes)."""
+    return metric.removeprefix("national_").removeprefix("provincial_")
+
+
+def _phr_scope_tag(scope: str, province: str | None = None) -> str:
+    if scope == "national":
+        return "NATIONAL"
+    if scope == "provincial" and province:
+        return province.upper()
+    return scope.upper()
 
 
 def _parse_phr_date(value) -> datetime.date | None:
@@ -928,8 +937,8 @@ def _extract_phr_block(block: object) -> tuple[str | None, str | None]:
 def load_public_health_context() -> dict:
     """Extract INSP pillar narratives from the build GeoJSON for the Context tab.
 
-    National rollup metrics are stored once (identical on every zone). Zone-level
-    metrics are keyed by canonical ``nom`` and only included when non-empty.
+    National and provincial rollup metrics are read once (broadcast to zones in
+    the GeoJSON build). Zone-level metrics are keyed by canonical ``nom``.
     """
     empty = {"national": [], "by_nom": {}}
     if not BUILD_GEOJSON.exists():
@@ -945,13 +954,13 @@ def load_public_health_context() -> dict:
         print(f"  NOTE: no {_PHR_DATASET} block in build GeoJSON; context tab empty")
         return empty
 
-    national: list[dict] = []
+    rollups: list[dict] = []
     for metric in _PHR_NATIONAL_METRICS:
         text, date = _extract_phr_block(sample_phr.get(metric))
         if not text:
             continue
         parsed = _parse_phr_date(date)
-        national.append({
+        rollups.append({
             "metric": metric,
             "category": _phr_category(metric),
             "label": _phr_metric_label(metric),
@@ -959,8 +968,40 @@ def load_public_health_context() -> dict:
             "date": date,
             "date_iso": parsed.isoformat() if parsed else None,
             "scope": "national",
+            "scope_tag": _phr_scope_tag("national"),
         })
-    national = _sort_phr_pillars(national)
+
+    seen_provincial: set[tuple[str, str]] = set()
+    for nom in sorted(props_by_nom):
+        props = props_by_nom[nom]
+        province = props.get("province")
+        if not province:
+            continue
+        phr = props.get(_PHR_DATASET) or {}
+        if not isinstance(phr, dict):
+            continue
+        for metric in _PHR_PROVINCIAL_METRICS:
+            key = (province, metric)
+            if key in seen_provincial:
+                continue
+            text, date = _extract_phr_block(phr.get(metric))
+            if not text:
+                continue
+            seen_provincial.add(key)
+            parsed = _parse_phr_date(date)
+            rollups.append({
+                "metric": metric,
+                "category": _phr_category(metric),
+                "label": _phr_metric_label(metric),
+                "text": text,
+                "date": date,
+                "date_iso": parsed.isoformat() if parsed else None,
+                "scope": "provincial",
+                "scope_tag": _phr_scope_tag("provincial", province),
+                "province": province,
+            })
+
+    rollups = _sort_phr_pillars(rollups)
 
     by_nom: dict[str, list[dict]] = {}
     for nom, props in props_by_nom.items():
@@ -985,11 +1026,13 @@ def load_public_health_context() -> dict:
         if pillars:
             by_nom[nom] = _sort_phr_pillars(pillars)
 
+    n_national = sum(1 for p in rollups if p.get("scope") == "national")
+    n_provincial = sum(1 for p in rollups if p.get("scope") == "provincial")
     print(
-        f"  public health context: {len(national)} national pillar(s), "
-        f"{len(by_nom)} zone(s) with local narrative"
+        f"  public health context: {n_national} national + {n_provincial} provincial "
+        f"pillar(s), {len(by_nom)} zone(s) with local narrative"
     )
-    return {"national": national, "by_nom": by_nom}
+    return {"national": rollups, "by_nom": by_nom}
 
 
 # ---------------------------------------------------------------------------
@@ -1994,7 +2037,7 @@ HTML_TEMPLATE = r"""<!doctype html>
     top:12px; left:12px; bottom:auto; right:auto;
     width:min(280px, calc(50vw - 24px));
     max-width:280px;
-    max-height:40vh;
+    max-height:80vh;
     overflow:hidden; display:none;
     flex-direction:column;
     box-sizing:border-box;
@@ -2357,8 +2400,8 @@ HTML_TEMPLATE = r"""<!doctype html>
 </div>
 <div id="context-national" class="panel">
   <div class="panel-header">
-    <strong>National response</strong>
-    <button class="panel-toggle" data-target="context-national" type="button" aria-label="Toggle national context panel" title="Collapse / expand national context">−</button>
+    <strong>National and Provincial Response</strong>
+    <button class="panel-toggle" data-target="context-national" type="button" aria-label="Toggle national and provincial context panel" title="Collapse / expand national and provincial context">−</button>
   </div>
   <div id="context-national-body" class="panel-body context-empty"></div>
 </div>
@@ -2975,9 +3018,20 @@ function sortContextPillarsByDate(pillars) {
 }
 
 function phrPillarCategoryClass(pillar) {
-  const cat = pillar.category || (pillar.metric || "").replace(/^national_/, "");
+  const cat = pillar.category || (pillar.metric || "").replace(/^national_/, "").replace(/^provincial_/, "");
   if (!cat) return "";
   return "pillar-" + cat.replace(/_/g, "-");
+}
+
+function phrScopeStamp(pillar) {
+  if (pillar && pillar.scope_tag) return pillar.scope_tag;
+  if (!pillar) return "";
+  if (pillar.scope === "national") return "NATIONAL";
+  if (pillar.scope === "provincial" && pillar.province) {
+    return String(pillar.province).toUpperCase();
+  }
+  if (pillar.scope === "zone") return "HEALTH ZONE";
+  return "";
 }
 
 function renderContextPillarHtml(pillar, opts) {
@@ -2985,8 +3039,8 @@ function renderContextPillarHtml(pillar, opts) {
   const catClass = phrPillarCategoryClass(pillar);
   let meta = "";
   if (!opts.hideScopeTag) {
-    const scopeLabel = pillar.scope === "national" ? "National" : "Health zone";
-    meta = "<span class='scope-tag'>" + escHtml(scopeLabel) + "</span>";
+    const stamp = phrScopeStamp(pillar);
+    if (stamp) meta = "<span class='scope-tag'>" + escHtml(stamp) + "</span>";
   }
   const dateStr = formatContextDate(pillar.date);
   if (dateStr) meta += "<span>as of " + escHtml(dateStr) + "</span>";
@@ -3000,28 +3054,54 @@ function renderContextPillarHtml(pillar, opts) {
   );
 }
 
-function renderNationalContextPanel() {
-  const body = document.getElementById("context-national-body");
-  if (!body) return;
-  const national = (PAYLOAD.phr_context || {}).national || [];
-  if (!national.length) {
-    body.className = "panel-body context-empty";
-    body.innerHTML = "<p>No national SitRep pillar notes available.</p>";
-    return;
+function zoneFeatureProps(nom) {
+  for (const feat of PAYLOAD.geometry.features) {
+    if (feat.properties.nom === nom) {
+      return feat.properties;
+    }
   }
-  body.className = "panel-body";
-  body.innerHTML = sortContextPillarsByDate(national).map(function(p) {
-    return renderContextPillarHtml(p, {hideScopeTag: true});
-  }).join("");
+  return null;
 }
 
 function zoneDisplayName(nom) {
-  for (const feat of PAYLOAD.geometry.features) {
-    if (feat.properties.nom === nom) {
-      return feat.properties.name || nom;
-    }
+  const props = zoneFeatureProps(nom);
+  return props ? (props.name || nom) : nom;
+}
+
+function zoneProvince(nom) {
+  const props = zoneFeatureProps(nom);
+  return props ? (props.province || null) : null;
+}
+
+function filterRollupsForContext(nom) {
+  const allRollups = (PAYLOAD.phr_context || {}).national || [];
+  if (!nom) {
+    return allRollups.filter(function(p) { return p.scope === "national"; });
   }
-  return nom;
+  const province = zoneProvince(nom);
+  return allRollups.filter(function(p) {
+    if (p.scope === "national") return true;
+    if (p.scope === "provincial" && province && p.province === province) return true;
+    return false;
+  });
+}
+
+function renderNationalContextPanel(nom) {
+  const body = document.getElementById("context-national-body");
+  if (!body) return;
+  body.scrollTop = 0;
+  const rollups = filterRollupsForContext(nom);
+  if (!rollups.length) {
+    body.className = "panel-body context-empty";
+    body.innerHTML = nom
+      ? "<p>No national or provincial SitRep notes for this area.</p>"
+      : "<p>No national SitRep pillar notes available.</p>";
+    return;
+  }
+  body.className = "panel-body";
+  body.innerHTML = sortContextPillarsByDate(rollups).map(function(p) {
+    return renderContextPillarHtml(p);
+  }).join("");
 }
 
 let contextSelectedNom = null;
@@ -3053,6 +3133,7 @@ function renderContextPanel(nom) {
   const title = document.getElementById("context-title");
   if (!body) return;
   document.body.classList.toggle("context-zone-hovered", !!nom);
+  renderNationalContextPanel(nom);
   body.scrollTop = 0;
   if (!nom) {
     if (title) title.textContent = "Health zone context";
@@ -3106,7 +3187,6 @@ function setActiveView(view) {
   } else if (view === "context") {
     hideProvinceOutlines();
     renderTrendsPanel(null);
-    renderNationalContextPanel();
     clearContextSelection();
     if (savedMapLayerId && activeView === "trends") {
       layerSelect.value = savedMapLayerId;

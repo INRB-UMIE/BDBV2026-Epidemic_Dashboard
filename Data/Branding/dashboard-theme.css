@@ -217,6 +217,26 @@ h4 {
   color: var(--muted) !important;
 }
 
+/* ── Context tab (national / provincial / zone pillars) ─── */
+#context-national-body.context-empty,
+#context-body.context-empty {
+  color: var(--muted) !important;
+}
+.context-pillar h4 {
+  color: var(--terracotta) !important;
+}
+.context-pillar .context-meta {
+  color: var(--muted) !important;
+}
+.context-pillar .context-meta .scope-tag {
+  background: #f3f1ec !important;
+  color: var(--terracotta) !important;
+  border: 1px solid var(--border);
+}
+.context-pillar p {
+  color: var(--ink) !important;
+}
+
 /* ── Modals ─────────────────────────────────────────────── */
 .modal .sheet {
   background: var(--card) !important;
