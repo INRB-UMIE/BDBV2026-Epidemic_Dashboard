@@ -35,6 +35,8 @@ the project root, alongside the ``Scripts/`` folder containing this file::
     │   │   ├── INSP.jpeg
     │   │   ├── INOHA.jpeg
     │   │   └── UMIE.jpeg
+    │   ├── WHO_Hospitalisations_Draft.csv   (optional; facility-level hospital
+    │   │                                     counts aggregated by health zone)
     │   └── Refugee_IDP sites/<*.geojson>    (optional; the dashboard exposes only
     │                                         per-zone aggregates, never coordinates)
     └── output/
@@ -93,6 +95,12 @@ TERMS_TXT        = DATA_ROOT / "ToS" / "Terms of Use.txt"
 BRANDING_DIR     = DATA_ROOT / "Branding"
 BRANDING_URLS    = BRANDING_DIR / "urls.txt"
 THEME_CSS        = BRANDING_DIR / "dashboard-theme.css"
+WHO_HOSP_CANDIDATES = (
+    DATA_ROOT / "WHO Hospitalisations_Draft.csv",
+    DATA_ROOT / "WHO Hospitalisations_Draft.xlsx",
+    DATA_ROOT / "WHO_Hospitalisations_Draft.csv",
+    DATA_ROOT / "WHO_Hospitalisations_Draft.xlsx",
+)
 
 
 # ---------------------------------------------------------------------------
@@ -1096,6 +1104,154 @@ def _extract_matrix_column(csv_path: Path, target_col: str) -> dict[str, float |
     return {str(row[nom_col]): _f(row[col]) for _, row in df.iterrows()}
 
 
+def _resolve_who_hospitalisations_path() -> Path | None:
+    """Return the first existing WHO hospitalisations draft file in Data/."""
+    for path in WHO_HOSP_CANDIDATES:
+        if path.exists():
+            return path
+    return None
+
+
+def _sum_known_capacity(series: pd.Series) -> int | None:
+    """Sum numeric capacity values; return None when every facility is unknown."""
+    known = pd.to_numeric(series, errors="coerce")
+    if not known.notna().any():
+        return None
+    return int(known.sum(skipna=True))
+
+
+def _occupancy(cases: int, capacity: int | None) -> float | None:
+    """Cases ÷ reported bed capacity; None when capacity is unknown or zero."""
+    if capacity is None or capacity <= 0:
+        return None
+    return round(cases / capacity, 4)
+
+
+def _facility_capacity_value(row: pd.Series, col: str | None) -> int | None:
+    if not col:
+        return None
+    val = pd.to_numeric(row.get(col), errors="coerce")
+    if pd.isna(val):
+        return None
+    return int(val)
+
+
+def _facility_record(row: pd.Series, facility_col: str, susp_col: str, conf_col: str,
+                     cap_susp_col: str | None, cap_conf_col: str | None) -> dict:
+    susp = int(row[susp_col])
+    conf = int(row[conf_col])
+    total = susp + conf
+    cap_susp = _facility_capacity_value(row, cap_susp_col)
+    cap_conf = _facility_capacity_value(row, cap_conf_col)
+    if cap_susp is None and cap_conf is None:
+        cap_total = None
+    else:
+        cap_total = int((cap_susp or 0) + (cap_conf or 0))
+    return {
+        "facility": str(row[facility_col]).strip(),
+        "suspected": susp,
+        "confirmed": conf,
+        "total": total,
+        "occupancy_total": _occupancy(total, cap_total),
+    }
+
+
+def _aggregate_who_hospitalisations_zone(group: pd.DataFrame, susp_col: str, conf_col: str,
+                                         cap_susp_col: str | None,
+                                         cap_conf_col: str | None) -> dict:
+    """Roll facility rows up to one zone record (cases summed; occupancy from known capacity)."""
+    susp = int(group[susp_col].sum())
+    conf = int(group[conf_col].sum())
+    total = susp + conf
+    cap_susp = _sum_known_capacity(group[cap_susp_col]) if cap_susp_col else None
+    cap_conf = _sum_known_capacity(group[cap_conf_col]) if cap_conf_col else None
+    if cap_susp is None and cap_conf is None:
+        cap_total = None
+    else:
+        cap_total = int((cap_susp or 0) + (cap_conf or 0))
+    return {
+        "who_hosp_suspected": susp,
+        "who_hosp_confirmed": conf,
+        "who_hosp_total": total,
+        "who_hosp_occupancy_suspected": _occupancy(susp, cap_susp),
+        "who_hosp_occupancy_confirmed": _occupancy(conf, cap_conf),
+        "who_hosp_occupancy_total": _occupancy(total, cap_total),
+    }
+
+
+def _load_who_hospitalisations_by_nom() -> tuple[dict[str, dict], str | None]:
+    """Aggregate facility-level WHO hospitalisation counts by health zone (nom).
+
+    Case counts treat NA as zero. Occupancy uses reported bed capacity only;
+    zones with no reported capacity for a metric are left as null (no data on map).
+
+    Returns ({nom: {who_hosp_* fields}}, {nom: [facility records]}, as-of date string).
+    """
+    path = _resolve_who_hospitalisations_path()
+    if path is None:
+        print("  NOTE: WHO Hospitalisations_Draft not found; hospitalisation layers unavailable")
+        return {}, {}, None
+
+    if path.suffix.lower() in {".xlsx", ".xls"}:
+        df = pd.read_excel(path)
+    else:
+        df = pd.read_csv(path)
+    if df.empty:
+        print(f"  WARNING: {path.name} is empty")
+        return {}, {}, None
+
+    df = df.copy()
+    df.columns = [str(c).strip() for c in df.columns]
+    col_map = {c.lower(): c for c in df.columns}
+    nom_col = col_map.get("nom") or col_map.get("health_zone") or col_map.get("zone")
+    susp_col = col_map.get("suspected")
+    conf_col = col_map.get("confirmed")
+    cap_susp_col = col_map.get("capacity_suspected")
+    cap_conf_col = col_map.get("capacity_confirmed")
+    date_col = col_map.get("date")
+    facility_col = col_map.get("facility") or col_map.get("facility_name")
+    if not nom_col or not susp_col or not conf_col:
+        print(f"  WARNING: {path.name} needs nom, Suspected, and Confirmed columns")
+        return {}, {}, None
+
+    work = df
+    asof: str | None = None
+    if date_col:
+        parsed = pd.to_datetime(work[date_col], errors="coerce")
+        work = work.assign(_parsed_date=parsed)
+        latest = work["_parsed_date"].max()
+        if pd.notna(latest):
+            work = work[work["_parsed_date"] == latest]
+            asof = latest.date().strftime("%d %b %Y").lstrip("0")
+
+    for c in (susp_col, conf_col):
+        work[c] = pd.to_numeric(work[c], errors="coerce").fillna(0)
+    for c in (cap_susp_col, cap_conf_col):
+        if c:
+            work[c] = pd.to_numeric(work[c], errors="coerce")
+
+    work["_nom"] = work[nom_col].astype(str).str.strip().map(
+        lambda n: _NAME_TO_NOM.get(n, n)
+    )
+
+    out: dict[str, dict] = {}
+    facilities_by_nom: dict[str, list[dict]] = {}
+    for nom, group in work.groupby("_nom", sort=True):
+        out[nom] = _aggregate_who_hospitalisations_zone(
+            group, susp_col, conf_col, cap_susp_col, cap_conf_col,
+        )
+        if facility_col:
+            facilities_by_nom[nom] = [
+                _facility_record(row, facility_col, susp_col, conf_col,
+                                 cap_susp_col, cap_conf_col)
+                for _, row in group.sort_values(facility_col).iterrows()
+            ]
+    n_facilities = sum(len(v) for v in facilities_by_nom.values())
+    print(f"  WHO hospitalisations: {len(out)} zone(s), {n_facilities} facilities from {path.name}"
+          + (f" (as of {asof})" if asof else ""))
+    return out, facilities_by_nom, asof
+
+
 def _extract_matrix_row_sums(csv_path: Path) -> dict[str, float | None]:
     """Sum each row of a zone-to-zone matrix (excluding the nom column).
     Returns {nom: row_sum}."""
@@ -1133,6 +1289,7 @@ def load_metadata(
         EXTERNAL_DATA / "IDP" / "processed" / "idp__individuals__static.matrix.csv")
     flowminder_incoming = _extract_matrix_row_sums(
         EXTERNAL_DATA / "flowminder" / "processed" / "flowminder__inflow__static.matrix.csv")
+    who_hosp_by_nom, who_hosp_facilities, who_hosp_asof = _load_who_hospitalisations_by_nom()
 
     zone_data: dict[str, dict] = {}
     for nom, props in build_props.items():
@@ -1176,6 +1333,16 @@ def load_metadata(
         local = local_fields.get(nom, {})
         rec["relative_risk"] = local.get("relative_risk")
 
+        # WHO hospitalisations draft (facility rows aggregated by zone)
+        who_hosp = who_hosp_by_nom.get(nom, {})
+        for field in (
+            "who_hosp_suspected", "who_hosp_confirmed", "who_hosp_total",
+            "who_hosp_occupancy_suspected", "who_hosp_occupancy_confirmed",
+            "who_hosp_occupancy_total",
+        ):
+            if field in who_hosp:
+                rec[field] = who_hosp[field]
+
         zone_data[nom] = rec
 
     # Case totals
@@ -1186,6 +1353,10 @@ def load_metadata(
     totals["affected_zones"] = sum(
         1 for r in zone_data.values()
         if (int(r.get("confirmed_cases") or 0) + int(r.get("suspected_cases") or 0)) > 0)
+    if who_hosp_asof:
+        totals["who_hosp_asof"] = who_hosp_asof
+    if who_hosp_facilities:
+        totals["who_hosp_facilities"] = who_hosp_facilities
 
     return zone_data, totals
 
@@ -1739,6 +1910,12 @@ EXTRA_LAYER_DEFS = [
     ("Observed (epi update)", "obs::suspected", "Suspected cases",                     "suspected_cases",  "reds", "log", "int", False),
     ("Observed (epi update)", "obs::conf_d",    "Confirmed deaths",                    "confirmed_deaths", "reds", "log", "int", False),
     ("Observed (epi update)", "obs::susp_d",    "Suspected deaths",                    "suspected_deaths", "reds", "log", "int", False),
+    ("Hospitalisations (WHO draft)", "who_hosp::total",     "Total cases in hospital",      "who_hosp_total",               "reds", "log", "int", False),
+    ("Hospitalisations (WHO draft)", "who_hosp::suspected", "Suspected cases in hospital",  "who_hosp_suspected",           "reds", "log", "int", False),
+    ("Hospitalisations (WHO draft)", "who_hosp::confirmed", "Confirmed cases in hospital",  "who_hosp_confirmed",           "reds", "log", "int", False),
+    ("Hospitalisations (WHO draft)", "who_hosp::occ_total", "Total bed occupancy",          "who_hosp_occupancy_total",     "outbreak", "linear", 2, False),
+    ("Hospitalisations (WHO draft)", "who_hosp::occ_susp",  "Suspected bed occupancy",      "who_hosp_occupancy_suspected", "outbreak", "linear", 2, False),
+    ("Hospitalisations (WHO draft)", "who_hosp::occ_conf",  "Confirmed bed occupancy",      "who_hosp_occupancy_confirmed", "outbreak", "linear", 2, False),
     ("Modeled projection",    "cal::true",      "Relative risk",                       "relative_risk",    "outbreak", "log", 2, False),
     ("Incoming Mobility",     "disp::in",       "Incoming displaced persons (12mo)",   "displaced_in_individuals_12mo", "reds", "log", "int", False),
     ("Incoming Mobility",     "flow::in",       "Flowminder incoming relocations (March 2026)",          "flowminder_in_mar2026",         "reds", "log", "int", True),
@@ -1779,6 +1956,7 @@ PROJECTION_MASK_MIN = 0.005
 # order after these entries.
 LAYER_GROUP_ORDER = [
     "Observed (epi update)",
+    "Hospitalisations (WHO draft)",
     "Testing capacity",
 ]
 
@@ -1837,6 +2015,7 @@ def build_payload() -> dict:
     print(f"  auto-discovered {len(discovered_layers)} layers from GeoJSON")
 
     zone_data, case_totals = load_metadata(centroids_by_nom, field_paths)
+    who_hosp_facilities = case_totals.pop("who_hosp_facilities", {})
     print(f"  assembled metadata for {len(zone_data)} zones")
 
     initial_view = None
@@ -1847,11 +2026,29 @@ def build_payload() -> dict:
     # Extra layers (computed fields, matrices, local CSV) go first,
     # then auto-discovered GeoJSON layers. Extra defs override discovery labels
     # for the same flat field (e.g. Flowminder short-trip outflow snapshots).
-    extra_layers = [
-        _make_layer_def(group, lid, label, field, palette, scale, legend_round, epicenter_highlight)
-        for (group, lid, label, field, palette, scale, legend_round, epicenter_highlight)
-        in EXTRA_LAYER_DEFS
-    ]
+    who_hosp_asof = case_totals.get("who_hosp_asof")
+    who_hosp_base = "WHO hospitalisations draft"
+    if who_hosp_asof:
+        who_hosp_base += f" (as of {who_hosp_asof})"
+    who_hosp_occ_source = (
+        who_hosp_base
+        + ". Occupancy = cases ÷ reported bed capacity; "
+        "no data when capacity is unknown."
+    )
+    extra_layers = []
+    for (group, lid, label, field, palette, scale, legend_round, epicenter_highlight) in EXTRA_LAYER_DEFS:
+        if lid.startswith("who_hosp::occ"):
+            source = who_hosp_occ_source
+        elif lid.startswith("who_hosp::"):
+            source = who_hosp_base
+        else:
+            source = ""
+        extra_layers.append(
+            _make_layer_def(
+                group, lid, label, field, palette, scale, legend_round,
+                epicenter_highlight, source=source,
+            )
+        )
     extra_fields = {layer["field"] for layer in extra_layers}
     discovered_layers = [
         layer for layer in discovered_layers if layer["field"] not in extra_fields
@@ -1933,6 +2130,7 @@ def build_payload() -> dict:
         "province_boundaries": province_boundaries,
         "onset_trends": onset_trends,
         "phr_context": phr_context,
+        "who_hosp_facilities": who_hosp_facilities,
     }
 
 
@@ -2259,6 +2457,21 @@ HTML_TEMPLATE = r"""<!doctype html>
   .footer { font-size:10px; color:#888; margin-top:8px; }
   .checkbox-row { display:flex; align-items:center; margin-top:6px; gap:6px; }
   .case-icon { width:14px; height:14px; border-radius:50%; background:rgba(91,134,179,0.85); border:1.5px solid #fff; box-shadow:0 0 6px rgba(91,134,179,0.45); }
+  .who-hosp-tooltip {
+    background: rgba(20,20,20,0.96) !important;
+    border: 1px solid #555 !important;
+    color: #eee !important;
+    border-radius: 6px !important;
+    box-shadow: 0 2px 10px rgba(0,0,0,0.45) !important;
+    font-size: 11px !important;
+    padding: 0 !important;
+  }
+  .who-hosp-tooltip::before { border-top-color: rgba(20,20,20,0.96) !important; }
+  .who-hosp-tip { padding: 8px 10px; line-height: 1.35; max-width: 320px; }
+  .who-hosp-tip table { border-collapse: collapse; margin-top: 6px; width: 100%; }
+  .who-hosp-tip th, .who-hosp-tip td { padding: 2px 6px; text-align: right; border-bottom: 1px solid #333; }
+  .who-hosp-tip th:first-child, .who-hosp-tip td:first-child { text-align: left; max-width: 140px; }
+  .who-hosp-tip th { color: #aaa; font-weight: 600; font-size: 10px; }
   /* Trends / Context: marker dots must not steal pointer events from the map. */
   body.view-trends .leaflet-marker-pane .leaflet-marker-icon,
   body.view-context .leaflet-marker-pane .leaflet-marker-icon { pointer-events: none !important; }
@@ -2418,6 +2631,7 @@ HTML_TEMPLATE = r"""<!doctype html>
 <script>
 const PAYLOAD = JSON.parse(document.getElementById("payload").textContent);
 const ZONE_DATA = PAYLOAD.zone_data;
+const WHO_HOSP_FACILITIES = PAYLOAD.who_hosp_facilities || {};
 const LAYERS = PAYLOAD.layers;
 const TRAVEL_FROM = PAYLOAD.travel_from || "Mongbwalu";
 const EPICENTER_NOMS = new Set(PAYLOAD.epicenter_noms || []);
@@ -2656,6 +2870,9 @@ function recompute() {
   }
   currentDomain = {min:dlo, max:dhi, isLog:useLog, palette:PALETTES[layer.palette] || PLASMA};
   geoLayer.setStyle(styleFn);
+  geoLayer.eachLayer(function(leafletLayer) {
+    hideWhoHospFacilityTooltip(leafletLayer);
+  });
   updateLegend(layer);
   updateLayerMeta(layer);
 }
@@ -2711,6 +2928,7 @@ function fmt(v, kind) {
   if (v == null || Number.isNaN(v)) return "—";
   if (typeof v !== "number") return String(v);
   if (kind === "rel") return v.toFixed(2);
+  if (kind === "pct") return (v * 100).toFixed(0) + "%";
   if (kind === "cal") {
     if (Math.abs(v) < 1) return v.toFixed(1);
     return Math.round(v).toLocaleString();
@@ -2769,6 +2987,14 @@ function infoHTML(feature) {
   h += "<tr><td>suspected deaths</td><td>" + fmt(z.suspected_deaths) + "</td></tr>";
   h += "</table>";
 
+  if (z.who_hosp_total != null) {
+    h += "<h4>Hospitalisations (WHO draft)</h4>";
+    h += "<table>";
+    h += "<tr><td>total in hospital</td><td>" + fmt(z.who_hosp_total) + "</td></tr>";
+    h += "<tr><td>bed occupancy</td><td>" + fmt(z.who_hosp_occupancy_total, "pct") + "</td></tr>";
+    h += "</table>";
+  }
+
   h += "<h4>Population</h4>";
   h += "<table>";
   h += "<tr><td>pop count</td><td>" + fmt(z.worldpop__pop_count__pop_count) + "</td></tr>";
@@ -2811,6 +3037,45 @@ function infoHTML(feature) {
   return h;
 }
 
+function isWhoHospLayer(layer) {
+  return !!(layer && layer.id && layer.id.indexOf("who_hosp::") === 0);
+}
+
+function whoHospFacilityTooltipHtml(zoneName, facilities) {
+  let h = "<div class='who-hosp-tip'><strong>" + escHtml(zoneName) + "</strong>";
+  h += "<table><tr><th>Facility</th><th>Susp</th><th>Conf</th><th>Total</th><th>Occ</th></tr>";
+  for (const f of facilities) {
+    h += "<tr><td>" + escHtml(f.facility) + "</td>";
+    h += "<td>" + fmt(f.suspected) + "</td>";
+    h += "<td>" + fmt(f.confirmed) + "</td>";
+    h += "<td>" + fmt(f.total) + "</td>";
+    h += "<td>" + fmt(f.occupancy_total, "pct") + "</td></tr>";
+  }
+  h += "</table></div>";
+  return h;
+}
+
+function showWhoHospFacilityTooltip(leafletLayer, feature, latlng) {
+  const activeLayer = getLayer(layerSelect.value);
+  if (!isWhoHospLayer(activeLayer)) return;
+  const nom = feature.properties.nom;
+  const facilities = WHO_HOSP_FACILITIES[nom];
+  if (!facilities || !facilities.length) return;
+  const zoneName = feature.properties.name || nom;
+  leafletLayer.unbindTooltip();
+  leafletLayer.bindTooltip(whoHospFacilityTooltipHtml(zoneName, facilities), {
+    sticky: true,
+    className: "who-hosp-tooltip",
+    direction: "top",
+    opacity: 1,
+  }).openTooltip(latlng);
+}
+
+function hideWhoHospFacilityTooltip(leafletLayer) {
+  leafletLayer.closeTooltip();
+  leafletLayer.unbindTooltip();
+}
+
 const geoLayer = L.geoJSON(PAYLOAD.geometry, {
   style: styleFn,
   onEachFeature: function (feature, layer) {
@@ -2828,6 +3093,7 @@ const geoLayer = L.geoJSON(PAYLOAD.geometry, {
         e.target.bringToFront();
         document.getElementById("info-body").className = "";
         document.getElementById("info-body").innerHTML = infoHTML(feature);
+        showWhoHospFacilityTooltip(e.target, feature, e.latlng);
       },
       mouseout: function(e) {
         if (activeView === "trends") {
@@ -2842,6 +3108,7 @@ const geoLayer = L.geoJSON(PAYLOAD.geometry, {
           }
           return;
         }
+        hideWhoHospFacilityTooltip(e.target);
         geoLayer.resetStyle(e.target);
       },
       click: function(e) {
