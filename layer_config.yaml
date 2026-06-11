@@ -14,6 +14,7 @@ exclude:
   - epi
   - gdp_pc
   - epi_mve_inrb_app
+  - aggregated_insp_linelist
   # - healthsites_io                  # entire group
   # - cross_border__poe_passengers__n_poes   # single leaf
 
