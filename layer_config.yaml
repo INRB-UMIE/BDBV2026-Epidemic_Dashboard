@@ -13,6 +13,7 @@ exclude:
   - insp_sitrep
   - epi
   - gdp_pc
+  - epi_mve_inrb_app
   # - healthsites_io                  # entire group
   # - cross_border__poe_passengers__n_poes   # single leaf
 
