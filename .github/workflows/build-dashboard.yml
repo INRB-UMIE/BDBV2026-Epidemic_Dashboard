@@ -15,6 +15,15 @@
 #   EXTERNAL_REPO_TOKEN must grant Contents: Read on
 #   INRB-UMIE/BDBV2026-Processed_Sensitive_Data (not the old
 #   BDBV2026-Linelist_Processing) for the checkout step below to work.
+#
+#   READ_PHYLOGENETIC_ANALYSES is a separate secret that must grant
+#   Contents: Read on INRB-UMIE/BDBV2026-Phylogenetic_Analyses. It is kept
+#   distinct from EXTERNAL_REPO_TOKEN so the two private sources can be
+#   scoped and rotated independently. BDBV2026-Genomic_Epi is public and
+#   needs no token. If READ_PHYLOGENETIC_ANALYSES is missing or unscoped,
+#   the phylogenetics checkout fails the build outright -- deliberately,
+#   since a missing tree would otherwise drop the whole Genomic Epi tab
+#   from the payload silently.
 
 name: Build dashboard
 
@@ -158,14 +167,23 @@ jobs:
           path: BDBV2026-Processed_Sensitive_Data
           token: ${{ secrets.EXTERNAL_REPO_TOKEN }}
 
-      # Genomic-epi producer (public) — supplies the tree/tips/meta/skygrid/
-      # exponential products the genomic tab's payload slice ingests. No token
-      # needed (public repo); GENOMIC_DIR below points at its public/data/.
+      # Genomic-epi producer (public) — optional Ne sidecars when tipCount matches.
       - name: Checkout genomic-epi producer repo
         uses: actions/checkout@v4
         with:
           repository: INRB-UMIE/BDBV2026-Genomic_Epi
           path: BDBV2026-Genomic_Epi
+
+      # Phylogenetic analyses repo (private) — latest dated .tree under
+      # data/phylogenies/ plus the BEAST Ne curves under outputs/beast/.
+      # Needs its own READ_PHYLOGENETIC_ANALYSES secret; the default
+      # GITHUB_TOKEN is scoped to this repo only and cannot read it.
+      - name: Checkout phylogenetic analyses repo
+        uses: actions/checkout@v4
+        with:
+          repository: INRB-UMIE/BDBV2026-Phylogenetic_Analyses
+          path: BDBV2026-Phylogenetic_Analyses
+          token: ${{ secrets.READ_PHYLOGENETIC_ANALYSES }}
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -192,6 +210,8 @@ jobs:
           # with a warning, same as before).
           DASHBOARD_PLOTS_DIR: ${{ github.workspace }}/BDBV2026-Processed_Sensitive_Data/outputs
           GENOMIC_DIR: ${{ github.workspace }}/BDBV2026-Genomic_Epi/public/data
+          PHYLOGENIES_DIR: ${{ github.workspace }}/BDBV2026-Phylogenetic_Analyses/data/phylogenies
+          BEAST_NE_DIR: ${{ github.workspace }}/BDBV2026-Phylogenetic_Analyses/outputs/beast
           # Substituted into assets/engine.js so CARTO's raster tiles come back
           # unwatermarked. This is a public client-side key -- it is served to
           # every dashboard visitor either way -- held as a repo secret only so

@@ -1424,7 +1424,23 @@
      (set per-dataset in genomic.js). Deliberately NOT bold: bold changes the text
      width and reflows the button. */
   #genomic-panel .gen-chart { position: relative; height: 180px; min-height: 180px; }
+  #genomic-panel .gen-chart.gen-dist-chart { height: 260px; min-height: 260px; }
+  #genomic-panel .gen-chart.gen-corr-chart { height: 220px; min-height: 220px; }
   #genomic-panel .gen-chart svg { display: block; width: 100%; height: 100%; }
+  #genomic-panel .gen-strata-legend {
+    display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px;
+    margin: 0 0 6px; font-size: 10px; color: #5c574f;
+  }
+  #genomic-panel .gen-strata-swatch {
+    display: inline-block; width: 10px; height: 10px; border-radius: 2px;
+    margin-right: 4px; vertical-align: -1px;
+  }
+  #genomic-panel .gen-strata-swatch[data-cat="mongbwalu"] { background: #c45c26; }
+  #genomic-panel .gen-strata-swatch[data-cat="bunia_rwampara"] { background: #3d6b8a; }
+  #genomic-panel .gen-strata-swatch[data-cat="other"] { background: #8a8578; }
+  #genomic-panel .gen-strata-swatch.gen-strata-line {
+    width: 14px; height: 0; border-top: 2px dashed #2a2a27; border-radius: 0; background: transparent;
+  }
   #genomic-panel .ne-tip {
     position: absolute; pointer-events: none; background: rgba(255,255,255,0.97);
     border: 1px solid #e7e3db; border-radius: 6px; padding: 4px 7px; font-size: 10.5px;
@@ -1432,6 +1448,10 @@
   }
   #genomic-panel .ne-tip-d { font-weight: 700; margin-bottom: 2px; }
   #genomic-panel .ne-tip-ci { color: #9c968b; }
+  #genomic-panel .gen-ne-stale-note {
+    margin: 6px 10px 8px; font-size: 11px; line-height: 1.35; color: #7a7468;
+    font-style: italic;
+  }
 
   /* ── Phylogeny (embedded PearTree) ── */
   /* The tree needs a definite height for the embed's height:100% to resolve; the

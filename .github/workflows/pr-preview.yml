@@ -4,6 +4,10 @@
 # Setup (repository secrets):
 #   EXTERNAL_REPO_TOKEN — already used by build-dashboard.yml; must grant
 #     Contents: Read on INRB-UMIE/BDBV2026-Processed_Sensitive_Data.
+#   READ_PHYLOGENETIC_ANALYSES — separate secret, also used by
+#     build-dashboard.yml; must grant Contents: Read on
+#     INRB-UMIE/BDBV2026-Phylogenetic_Analyses.
+#   BDBV2026-Genomic_Epi is public and needs no token.
 #
 # This workflow uses GITHUB_TOKEN (requires org/repo workflow permissions:
 # read and write). Only add a PREVIEW_TOKEN secret if you need to override
@@ -106,13 +110,27 @@ jobs:
           path: BDBV2026-Processed_Sensitive_Data
           token: ${{ secrets.EXTERNAL_REPO_TOKEN }}
 
-      # Genomic-epi producer (public) — supplies the genomic tab's payload slice.
+      # Genomic-epi producer (public) — optional Ne sidecars when tipCount matches.
       - name: Checkout genomic-epi producer repo
         if: github.event.action != 'closed'
         uses: actions/checkout@v4
         with:
           repository: INRB-UMIE/BDBV2026-Genomic_Epi
           path: BDBV2026-Genomic_Epi
+
+      # Phylogenetic analyses repo (private) — latest dated .tree under
+      # data/phylogenies/ plus the BEAST Ne curves under outputs/beast/.
+      # Uses its own READ_PHYLOGENETIC_ANALYSES secret, not the
+      # EXTERNAL_REPO_TOKEN used by the processed-data checkout above.
+      # Safe here because fork PRs are skipped (see the job-level `if`), so the
+      # secret is never exposed to an untrusted head ref.
+      - name: Checkout phylogenetic analyses repo
+        if: github.event.action != 'closed'
+        uses: actions/checkout@v4
+        with:
+          repository: INRB-UMIE/BDBV2026-Phylogenetic_Analyses
+          path: BDBV2026-Phylogenetic_Analyses
+          token: ${{ secrets.READ_PHYLOGENETIC_ANALYSES }}
 
       - name: Set up Python
         if: github.event.action != 'closed'
@@ -133,6 +151,8 @@ jobs:
           DATA_ROOT: ${{ github.workspace }}/Data
           DASHBOARD_PLOTS_DIR: ${{ github.workspace }}/BDBV2026-Processed_Sensitive_Data/outputs
           GENOMIC_DIR: ${{ github.workspace }}/BDBV2026-Genomic_Epi/public/data
+          PHYLOGENIES_DIR: ${{ github.workspace }}/BDBV2026-Phylogenetic_Analyses/data/phylogenies
+          BEAST_NE_DIR: ${{ github.workspace }}/BDBV2026-Phylogenetic_Analyses/outputs/beast
           # Substituted into assets/engine.js so CARTO's raster tiles come back
           # unwatermarked. A public client-side key, held as a secret only so it
           # sits in one rotatable place; forks get an empty value and build a

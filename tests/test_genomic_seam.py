@@ -38,9 +38,14 @@ def test_genomic_module_contributes_rail_and_script():
     html = page.build_page(MINIMAL)
     assert 'id="genomic-panel"' in html
     assert 'id="gen-tree-body"' in html and 'id="gen-dist-body"' in html
+    assert 'id="gen-corr-body"' in html
     assert 'id="genomic-resize"' in html                      # drag handle present
     assert 'id="gen-ne-skygrid"' in html and 'id="gen-ne-exp"' in html   # Ne toggles present
+    assert 'id="gen-ne-stale-note"' in html
     assert 'id="gen-dist-imputed"' in html and 'id="gen-dist-beyond"' in html   # distribution controls
+    # Cases/genomes card must appear before the Ne card in the rail markup.
+    assert html.index('id="gen-dist-card"') < html.index('id="gen-ne-card"')
+    assert html.index('id="gen-corr-card"') < html.index('id="gen-ne-card"')
     assert 'gen-dist-csv' not in html                                          # data is not downloadable
     assert 'src="assets/genomic.js"' in html
     assert "stub-genomic-epidemiology" not in html

@@ -41,8 +41,10 @@ from common.paths import (
     CAVEATS_CSV, INVASION_RISK_CSV, DASHBOARD_PLOTS_DIR, SIT_REPS_DIR,
     METHODS_DOCX, METHODS_DOCX_FR, METHODS_HTML_FR, TERMS_TXT, TERMS_TXT_FR,
     BRANDING_DIR, BRANDING_URLS, THEME_CSS, LOCALES_DIR, SUPPORTED_LANGS,
-    OUTPUT_DIR, GENOMIC_DIR,
+    OUTPUT_DIR, GENOMIC_DIR, PHYLOGENIES_DIR, BEAST_NE_DIR,
 )
+from common.phylo_tree import prepare_phylo_tree_products, resolve_latest_phylogeny_tree
+from common.beast_ne import load_beast_ne_products, ne_stale_relative_to_tree
 
 # `from common.data_sources import *` (used by common/payload.py) only pulls
 # in names that don't start with an underscore *unless* __all__ is defined --
@@ -4209,27 +4211,87 @@ def load_data_build_info() -> dict | None:
     }
 
 
-def load_genomic_products(genomic_dir=None):
-    """Load the BDBV2026-Genomic_Epi products into a payload slice.
+def _load_genomic_sidecars(genomic_dir: Path, tip_count: int) -> dict:
+    """Load Ne sidecars from GENOMIC_DIR when present and tip counts agree."""
+    meta_path = genomic_dir / "ituri-meta.json"
+    if not meta_path.exists():
+        return {}
+    meta = json.loads(meta_path.read_text(encoding="utf-8"))
+    if int(meta.get("tipCount") or 0) != tip_count:
+        print(f"  genomic sidecars: skipped (Genomic_Epi tipCount "
+              f"{meta.get('tipCount')} != phylo tree {tip_count})")
+        return {}
+    out = {}
+    for key, fname in (("skygrid", "skygrid.json"), ("exponential", "exponential.json")):
+        path = genomic_dir / fname
+        if path.exists():
+            out[key] = json.loads(path.read_text(encoding="utf-8"))
+    return out
 
-    Returns {} when the sibling repo isn't present, so a build without it stays
-    green (the genomic tab is a stub until later phases wire it up). The tree is
-    returned as inline NEXUS text (PearTree's embed accepts it under the `tree`
-    key), so it needs no separate fetched asset.
+
+def _attach_ne_products(products: dict, genomic_dir: Path, beast_dir: Path | None = None) -> dict:
+    """Merge SkyGrid / exponential Ne curves onto a genomic products dict.
+
+    Prefer the latest dated drop under ``BEAST_NE_DIR``. If that drop is older
+    than the phylogeny folder date, keep the Ne curves and set ``ne_stale`` so
+    the UI can show a translated caveat. Fall back to Genomic_Epi sidecars only
+    when no BEAST Ne files are present.
     """
+    beast = load_beast_ne_products(beast_dir if beast_dir is not None else BEAST_NE_DIR)
+    if beast:
+        for key in ("skygrid", "exponential"):
+            if key in beast:
+                products[key] = beast[key]
+        products["ne_folder_date"] = beast.get("ne_folder_date")
+        products["ne_source_dir"] = beast.get("ne_source_dir")
+        tree_date = (products.get("meta") or {}).get("updated")
+        if ne_stale_relative_to_tree(beast.get("ne_folder_date"), tree_date):
+            products["ne_stale"] = True
+            print(f"  genomic Ne: {beast.get('ne_folder_date')} "
+                  f"(stale vs tree {tree_date})")
+        else:
+            print(f"  genomic Ne: {beast.get('ne_folder_date')} "
+                  f"(skygrid={'skygrid' in beast}, exp={'exponential' in beast})")
+        return products
+
+    products.update(_load_genomic_sidecars(genomic_dir, len(products.get("tips", []))))
+    return products
+
+
+def load_genomic_products(genomic_dir=None, phylogenies_dir=None, beast_ne_dir=None):
+    """Load genomic-tab products into a payload slice.
+
+    Tree/tips/meta come from the latest ``.tree`` under ``PHYLOGENIES_DIR``.
+    SkyGrid / exponential Ne curves come from the latest dated folder under
+    ``BEAST_NE_DIR`` (converted from Tracer ``*.ne.txt`` / legacy skygrid TSV).
+    When the phylogeny folder is newer than the Ne folder, the latest Ne is
+    still used and ``ne_stale`` is set for the UI (translated client-side).
+
+    Falls back to the legacy Genomic_Epi bundle when no phylo tree is found.
+    Returns {} when neither source is present (build stays green).
+    """
+    phylo_base = Path(phylogenies_dir) if phylogenies_dir is not None else PHYLOGENIES_DIR
+    phylo_path = resolve_latest_phylogeny_tree(phylo_base)
     d = Path(genomic_dir) if genomic_dir is not None else GENOMIC_DIR
+    beast = Path(beast_ne_dir) if beast_ne_dir is not None else BEAST_NE_DIR
+    if phylo_path is not None:
+        products = prepare_phylo_tree_products(phylo_path)
+        if products:
+            print(f"  genomic tree: {phylo_path} ({len(products.get('tips', []))} tips)")
+            return _attach_ne_products(products, d, beast)
+
     tree_path = d / "ituri-tree.ptree"
     if not tree_path.exists():
         return {}
     meta = json.loads((d / "ituri-meta.json").read_text(encoding="utf-8"))
-    return {
+    print(f"  genomic tree: Genomic_Epi fallback ({meta.get('tipCount')} tips)")
+    products = {
         "tree": tree_path.read_text(encoding="utf-8"),
         "tips": json.loads((d / "ituri-tips.json").read_text(encoding="utf-8")),
         "meta": meta,
-        "skygrid": json.loads((d / "skygrid.json").read_text(encoding="utf-8")),
-        "exponential": json.loads((d / "exponential.json").read_text(encoding="utf-8")),
         "data_build_date": meta.get("updated"),
     }
+    return _attach_ne_products(products, d, beast)
 
 
 def canonicalize_genomic_zones(genomic: dict, known_noms) -> dict:

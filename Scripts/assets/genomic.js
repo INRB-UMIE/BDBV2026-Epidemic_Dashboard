@@ -48,6 +48,7 @@
   ];
 
   function realZone(z) { return (z && z !== "null") ? z : null; }
+  function up(s) { return (s || "").toUpperCase().trim(); }
 
   // {map: {zone->hex}, order: [zone…] by descending tip count, counts: {zone->n}}.
   // Ordering by count gives the most-sampled zones the leading (most separable) hues.
@@ -267,14 +268,81 @@
     for (var k in attrs) n.setAttribute(k, String(attrs[k]));
     return n;
   }
-  var NE_PAD = { left: 42, right: 12, top: 12, bottom: 22 };
+  var NE_PAD = { left: 42, right: 14, top: 30, bottom: 22 };
+  var TIP_MARK_Y = 12;   // shared horizontal lane for tip-count circles (above the plot)
   function fmtDay(t) { return new Date(t).toLocaleDateString("en-GB", { day: "numeric", month: "short" }); }
+
+  function tipMarkerRadius(n, maxN) {
+    return Math.max(3, Math.min(10, 3 + 7 * Math.sqrt(n / Math.max(1, maxN))));
+  }
+
+  // Parse setMarkers input → [{t: ms, n: count}]. Accepts date strings, a
+  // date→count map, or [{date,n}] objects.
+  function normalizeTipMarkers(datesOrCounts) {
+    var counts = {};
+    if (Array.isArray(datesOrCounts)) {
+      datesOrCounts.forEach(function (d) {
+        if (d && typeof d === "object" && d.date != null) {
+          var key = String(d.date).slice(0, 10);
+          counts[key] = (counts[key] || 0) + (d.n || 1);
+        } else if (d != null) {
+          var ds = String(d).slice(0, 10);
+          counts[ds] = (counts[ds] || 0) + 1;
+        }
+      });
+    } else if (datesOrCounts && typeof datesOrCounts === "object") {
+      Object.keys(datesOrCounts).forEach(function (d) {
+        counts[String(d).slice(0, 10)] = +datesOrCounts[d] || 0;
+      });
+    }
+    return Object.keys(counts).map(function (d) {
+      return { t: +new Date(d), n: counts[d] };
+    }).filter(function (m) { return isFinite(m.t) && m.n > 0; });
+  }
+
+  // Circles on a single top lane + dashed drop-lines into the plot (upper region only).
+  function drawTipMarkers(svg, markers, xToPx, xLeft, xRight, lineBot) {
+    if (!markers || !markers.length) return;
+    var maxMark = 1;
+    markers.forEach(function (m) { if (m.n > maxMark) maxMark = m.n; });
+    markers.forEach(function (m) {
+      var x = xToPx(m.t);
+      if (x < xLeft - 1 || x > xRight + 1) return;
+      svg.appendChild(svgEl("line", {
+        x1: x, y1: TIP_MARK_Y, x2: x, y2: lineBot,
+        stroke: "#c79a1a", "stroke-width": 1, "stroke-dasharray": "3,2", opacity: 0.75
+      }));
+      var r = tipMarkerRadius(m.n, maxMark);
+      svg.appendChild(svgEl("circle", {
+        cx: x, cy: TIP_MARK_Y, r: r,
+        fill: "#f2c84b", stroke: "#9a7a16", "stroke-width": 1.2, opacity: 0.95
+      }));
+      if (m.n > 1) {
+        var nl = svgEl("text", {
+          x: x, y: TIP_MARK_Y + 3, "font-size": 8, fill: "#5a4a10",
+          "text-anchor": "middle", "font-weight": "700", style: "pointer-events:none"
+        });
+        nl.textContent = String(m.n);
+        svg.appendChild(nl);
+      }
+    });
+  }
 
   // Renders the Ne panel into #gen-ne-body. Static calendar-X (root->mostRecent);
   // tree-lock/brush/markers are added with the coordinator in a later phase.
   function renderNePanel(genomic) {
     var host = document.getElementById("gen-ne-body");
     if (!host) return;
+    var noteEl = document.getElementById("gen-ne-stale-note");
+    if (noteEl) {
+      if (genomic && genomic.ne_stale_note) {
+        noteEl.textContent = genomic.ne_stale_note;
+        noteEl.hidden = false;
+      } else {
+        noteEl.textContent = "";
+        noteEl.hidden = true;
+      }
+    }
     var sg = genomic.skygrid, ex = genomic.exponential;
     if (!sg && !ex) { host.textContent = "No Ne data"; return; }
     var meta = sg || ex;
@@ -294,7 +362,7 @@
     var tmeta = genomic.meta || {};
     var xMin = +new Date(tmeta.rootDate || meta.rootDate), xMax = +new Date(tmeta.mostRecentDate || meta.mostRecentDate);
     var transform = null;      // tree view transform (x-axis lock); null = static span
-    var markerDates = [];      // selected-tip dates (ms) → dashed vertical lines
+    var markerCounts = [];     // [{t,n}] selected-tip counts → top-lane circles
     var tip = document.createElement("div"); tip.className = "ne-tip"; tip.style.display = "none";
 
     function yDomain() {
@@ -362,16 +430,8 @@
       });
       svg.appendChild(gdata);
 
-      // Selected-tip date markers (dashed vertical lines), clipped to the plot.
-      if (markerDates.length) {
-        var gmk = svgEl("g", { "clip-path": "url(#gen-ne-clip)" });
-        markerDates.forEach(function (md) {
-          var x = xToPx(md);
-          if (x < NE_PAD.left - 1 || x > W - NE_PAD.right + 1) return;
-          gmk.appendChild(svgEl("line", { x1: x, y1: NE_PAD.top, x2: x, y2: baseY, stroke: "#c79a1a", "stroke-width": 1, "stroke-dasharray": "3,2", opacity: 0.85 }));
-        });
-        svg.appendChild(gmk);
-      }
+      // Tip markers: circles on the top lane; dashed lines through the plot.
+      drawTipMarkers(svg, markerCounts, xToPx, NE_PAD.left, W - NE_PAD.right, baseY);
 
       host.appendChild(svg);
       host.appendChild(tip);
@@ -417,12 +477,29 @@
     }
     return {
       setTransform: function (t) { transform = isUsableTransform(t) ? t : null; render(); },
-      setMarkers: function (dates) { markerDates = (dates || []).map(function (d) { return +new Date(d); }).filter(function (v) { return isFinite(v); }); render(); }
+      setMarkers: function (datesOrCounts) { markerCounts = normalizeTipMarkers(datesOrCounts); render(); }
     };
   }
 
-  var DIST_PAD = { left: 34, right: 14, top: 12, bottom: 22 };
+  var DIST_PAD = { left: 36, right: 42, top: 36, bottom: 22 };
   var DIST_OBS = "#9e2b2b", DIST_IMP = "#587e72";
+  var STRATA = [
+    { key: "mongbwalu", label: "Mongbwalu", color: "#c45c26" },
+    { key: "bunia_rwampara", label: "Bunia / Rwampara", color: "#3d6b8a" },
+    { key: "other", label: "Other", color: "#8a8578" }
+  ];
+  var PCT_COLOR = "#2a2a27";
+
+  function stratumKey(zone) {
+    var z = up(realZone(zone) || "");
+    if (z === "MONGBWALU" || z === "MONGBALU" || z === "MONGWALU" || z === "MUNGWALU") return "mongbwalu";
+    if (z === "BUNIA" || z === "RWAMPARA") return "bunia_rwampara";
+    return "other";
+  }
+
+  function emptyStrata() {
+    return { mongbwalu: 0, bunia_rwampara: 0, other: 0 };
+  }
 
   function niceLinearTicks(max) {
     max = Math.max(1, max);
@@ -433,8 +510,16 @@
     return ticks;
   }
 
-  // Renders the confirmed-positive-cases panel into #gen-dist-body. Static calendar-X;
-  // per-zone scope, tree-lock, sequence track, brush, and markers are Phase 5b.
+  function nicePctTicks(max) {
+    max = Math.max(10, max);
+    var step = max <= 25 ? 5 : max <= 50 ? 10 : 25;
+    var ticks = [];
+    for (var v = 0; v <= max + 0.001; v += step) ticks.push(v);
+    return ticks;
+  }
+
+  // Dual-axis cases (up) / genomes (down) panel, stratified by epicentre groups,
+  // with a top axis for daily sequencing coverage (genomes / confirmed cases %).
   function renderDistPanel(genomic) {
     var host = document.getElementById("gen-dist-body");
     if (!host) return;
@@ -444,54 +529,86 @@
     var meta = genomic.meta || {};
     var treeMin = +new Date(meta.rootDate), treeMax = +new Date(meta.mostRecentDate);
     var showImputed = true, showBeyond = false;
-    var transform = null;      // tree view transform (x-axis lock); null = own span
-    var markerDates = [];      // selected-tip dates (ms) → dashed vertical lines
+    var transform = null;
+    var markerCounts = [];   // [{t: ms, n: tipCount}] — upper (cases) half only
 
-    // Per-zone scope: selecting health zone(s) on the map/tree re-scopes the bars to
-    // those zones' onset counts (summed), matching the standalone; an empty scope
-    // falls back to the national series. `by_zone` is keyed by canonical nom, so index
-    // it upper-cased to match the coordinator's zoneNom() keys.
     var byZoneUpper = {};
-    Object.keys(od.by_zone || {}).forEach(function (z) { byZoneUpper[up(z)] = od.by_zone[z]; });
-    var scopeZones = [];       // current zone scope (empty = national)
-    function scopedSeries() {
-      if (!scopeZones.length) return od.national || {};
-      var merged = {};
-      scopeZones.forEach(function (z) {
-        var s = byZoneUpper[up(z)];
-        if (!s) return;
-        Object.keys(s).forEach(function (d) {
-          var cur = merged[d] || (merged[d] = { observed: 0, imputed: 0 });
-          cur.observed += s[d].observed || 0;
-          cur.imputed += s[d].imputed || 0;
-        });
+    Object.keys(od.by_zone || {}).forEach(function (z) { byZoneUpper[up(z)] = { nom: z, series: od.by_zone[z] }; });
+
+    // Genome counts by tip date × stratum (from the embedded phylogeny tips).
+    var genomeByDate = {};
+    (genomic.tips || []).forEach(function (t) {
+      var d = (t.date || "").slice(0, 10);
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(d)) return;
+      var sk = stratumKey(t.health_zone);
+      var bucket = genomeByDate[d] || (genomeByDate[d] = emptyStrata());
+      bucket[sk] += 1;
+    });
+
+    var scopeZones = [];
+    function dayCasesByStratum(dateStr) {
+      var out = emptyStrata();
+      var zoneKeys = scopeZones.length
+        ? scopeZones.map(function (z) { return up(z); })
+        : Object.keys(byZoneUpper);
+      zoneKeys.forEach(function (uk) {
+        var entry = byZoneUpper[uk];
+        if (!entry) return;
+        var c = entry.series[dateStr];
+        if (!c) return;
+        var n = (c.observed || 0) + (showImputed ? (c.imputed || 0) : 0);
+        if (!n) return;
+        out[stratumKey(entry.nom)] += n;
       });
-      return merged;
+      return out;
     }
+
+    function dayGenomesByStratum(dateStr) {
+      var g = genomeByDate[dateStr] || emptyStrata();
+      if (!scopeZones.length) return { mongbwalu: g.mongbwalu, bunia_rwampara: g.bunia_rwampara, other: g.other };
+      // When scoped, only count genomes from selected zones (re-bucket from tips).
+      var out = emptyStrata();
+      var allow = {};
+      scopeZones.forEach(function (z) { allow[up(z)] = 1; });
+      (genomic.tips || []).forEach(function (t) {
+        var d = (t.date || "").slice(0, 10);
+        if (d !== dateStr) return;
+        var z = realZone(t.health_zone);
+        if (!z || !allow[up(z)]) return;
+        out[stratumKey(z)] += 1;
+      });
+      return out;
+    }
+
+    var allDates = od.dates.slice();
+    Object.keys(genomeByDate).forEach(function (d) {
+      if (allDates.indexOf(d) < 0) allDates.push(d);
+    });
+    allDates.sort();
+
     var days = [];
     function rebuildDays() {
-      var series = scopedSeries();
-      days = od.dates.map(function (d) {
-        var c = series[d] || { observed: 0, imputed: 0 };
-        return { t: +new Date(d), ds: d, obs: c.observed || 0, imp: c.imputed || 0 };
+      days = allDates.map(function (d) {
+        var cases = dayCasesByStratum(d);
+        var genomes = dayGenomesByStratum(d);
+        var caseTot = cases.mongbwalu + cases.bunia_rwampara + cases.other;
+        var genTot = genomes.mongbwalu + genomes.bunia_rwampara + genomes.other;
+        return {
+          t: +new Date(d), ds: d,
+          cases: cases, genomes: genomes,
+          caseTot: caseTot, genTot: genTot,
+          pct: caseTot > 0 ? (100 * genTot) / caseTot : null
+        };
       });
     }
     rebuildDays();
     var tip = document.createElement("div"); tip.className = "ne-tip"; tip.style.display = "none";
-
-    // Lock the x-axis to the tree ONLY when NOT in "Look beyond" mode: beyond-tree
-    // onset dates extend past the tree's most-recent tip, and with no tree-compression
-    // strip (deferred) they'd clip off the locked axis. In beyond mode the panel uses
-    // its own span so all bars fit (it then intentionally spans a wider range than the
-    // tree/Ne, so pixel-alignment with them no longer applies).
     var locked = function () { return !!(transform && isFinite(treeMin) && isFinite(treeMax) && !showBeyond); };
 
     function render() {
-      var W = host.clientWidth || 320, H = host.clientHeight || 180;
+      var W = host.clientWidth || 320, H = host.clientHeight || 260;
       var vis = days.filter(function (d) { return showBeyond || d.t <= beyondFrom; });
       if (!vis.length) vis = days;
-      // Date→x: locked to the tree's transform (root→offsetX, mostRecent→+maxX·scaleX)
-      // so bars/markers align with the phylogeny + Ne panel; else the panel's own span.
       var lk = locked();
       var aMin = lk ? treeMin : Math.min.apply(null, vis.map(function (d) { return d.t; }));
       var aMax = lk ? treeMax : Math.max.apply(null, vis.map(function (d) { return d.t; }));
@@ -500,62 +617,120 @@
       var span = (aMax - aMin) || 1, dxp = (x1 - x0) || 1;
       var xToPx = function (t) { return x0 + ((t - aMin) / span) * dxp; };
       var pxToDate = function (px) { return aMin + ((px - x0) / dxp) * span; };
-      var yMax = Math.max(1, Math.max.apply(null, vis.map(function (d) { return d.obs + (showImputed ? d.imp : 0); })));
-      var baseY = H - DIST_PAD.bottom;
-      var yToPx = function (v) { return baseY - (v / yMax) * (baseY - DIST_PAD.top); };
+      var yMaxCases = Math.max(1, Math.max.apply(null, vis.map(function (d) { return d.caseTot; }).concat([0])));
+      var yMaxGenomes = Math.max(1, Math.max.apply(null, vis.map(function (d) { return d.genTot; }).concat([0])));
+      var pctMax = 100;   // fixed 0–100% coverage axis
+      var midY = Math.round((DIST_PAD.top + (H - DIST_PAD.bottom)) / 2);
+      var halfH = midY - DIST_PAD.top;
+      var yCase = function (v) { return midY - (v / yMaxCases) * halfH; };
+      var yGen = function (v) { return midY + (v / yMaxGenomes) * halfH; };
+      var yPct = function (v) { return DIST_PAD.top + halfH - (Math.min(Math.max(v, 0), pctMax) / pctMax) * halfH; };
       var pxPerDay = Math.abs(xToPx(aMin + 86400000) - xToPx(aMin));
       var barW = Math.max(1, pxPerDay - 1);
 
       host.replaceChildren();
       var svg = svgEl("svg", { viewBox: "0 0 " + W + " " + H, preserveAspectRatio: "none" });
-      // Clip drawing to the plot gutter (an x-locked panel can push bars/beyond-region
-      // past the axes when the tree is panned/zoomed/resized).
       var clip = svgEl("clipPath", { id: "gen-dist-clip" });
-      clip.appendChild(svgEl("rect", { x: DIST_PAD.left, y: DIST_PAD.top, width: Math.max(0, W - DIST_PAD.left - DIST_PAD.right), height: Math.max(0, H - DIST_PAD.top - DIST_PAD.bottom) }));
+      clip.appendChild(svgEl("rect", {
+        x: DIST_PAD.left, y: DIST_PAD.top,
+        width: Math.max(0, W - DIST_PAD.left - DIST_PAD.right),
+        height: Math.max(0, H - DIST_PAD.top - DIST_PAD.bottom)
+      }));
       svg.appendChild(clip);
 
       if (showBeyond && isFinite(beyondFrom)) {
         var bx = Math.max(DIST_PAD.left, Math.min(W - DIST_PAD.right, xToPx(beyondFrom)));
         if (bx < W - DIST_PAD.right) {
-          svg.appendChild(svgEl("rect", { x: bx, y: DIST_PAD.top, width: Math.max(0, (W - DIST_PAD.right) - bx), height: baseY - DIST_PAD.top, fill: "rgba(0,0,0,0.04)" }));
-          var blab = svgEl("text", { x: bx + 3, y: DIST_PAD.top + 9, "font-size": 8, fill: "#9c968b" }); blab.textContent = "beyond tree"; svg.appendChild(blab);
+          svg.appendChild(svgEl("rect", {
+            x: bx, y: DIST_PAD.top, width: Math.max(0, (W - DIST_PAD.right) - bx),
+            height: H - DIST_PAD.top - DIST_PAD.bottom, fill: "rgba(0,0,0,0.04)"
+          }));
+          var blab = svgEl("text", { x: bx + 3, y: DIST_PAD.top + 9, "font-size": 8, fill: "#9c968b" });
+          blab.textContent = "beyond tree"; svg.appendChild(blab);
         }
       }
 
-      niceLinearTicks(yMax).forEach(function (v) {
-        var y = yToPx(v);
-        svg.appendChild(svgEl("line", { x1: DIST_PAD.left, y1: y, x2: W - DIST_PAD.right, y2: y, stroke: "#eee", "stroke-width": 1 }));
-        var lbl = svgEl("text", { x: DIST_PAD.left - 4, y: y + 3, "font-size": 9, fill: "#9c968b", "text-anchor": "end" }); lbl.textContent = String(v); svg.appendChild(lbl);
+      // Left count axes: cases↑ and genomes↓ use independent scales.
+      niceLinearTicks(yMaxCases).forEach(function (v) {
+        if (v === 0) return;
+        var yc = yCase(v);
+        svg.appendChild(svgEl("line", { x1: DIST_PAD.left, y1: yc, x2: W - DIST_PAD.right, y2: yc, stroke: "#eee", "stroke-width": 1 }));
+        var lc = svgEl("text", { x: DIST_PAD.left - 4, y: yc + 3, "font-size": 9, fill: "#9c968b", "text-anchor": "end" });
+        lc.textContent = String(v); svg.appendChild(lc);
       });
+      niceLinearTicks(yMaxGenomes).forEach(function (v) {
+        if (v === 0) return;
+        var yg = yGen(v);
+        svg.appendChild(svgEl("line", { x1: DIST_PAD.left, y1: yg, x2: W - DIST_PAD.right, y2: yg, stroke: "#eee", "stroke-width": 1 }));
+        var lg = svgEl("text", { x: DIST_PAD.left - 4, y: yg + 3, "font-size": 9, fill: "#9c968b", "text-anchor": "end" });
+        lg.textContent = String(v); svg.appendChild(lg);
+      });
+      var zeroLbl = svgEl("text", { x: DIST_PAD.left - 4, y: midY + 3, "font-size": 9, fill: "#9c968b", "text-anchor": "end" });
+      zeroLbl.textContent = "0"; svg.appendChild(zeroLbl);
 
-      svg.appendChild(svgEl("line", { x1: DIST_PAD.left, y1: baseY, x2: W - DIST_PAD.right, y2: baseY, stroke: "#c9c7c2", "stroke-width": 1 }));
-      // x ticks from the visible date range (tracks the lock).
+      // Top/right % axis fixed at 0–100%.
+      nicePctTicks(pctMax).forEach(function (v) {
+        var y = yPct(v);
+        var rl = svgEl("text", { x: W - DIST_PAD.right + 4, y: y + 3, "font-size": 9, fill: PCT_COLOR, "text-anchor": "start" });
+        rl.textContent = v + "%"; svg.appendChild(rl);
+      });
+      var pctTitle = svgEl("text", { x: W - DIST_PAD.right + 4, y: DIST_PAD.top - 10, "font-size": 8, fill: PCT_COLOR, "text-anchor": "start" });
+      pctTitle.textContent = "genomes/cases"; svg.appendChild(pctTitle);
+
+      svg.appendChild(svgEl("line", { x1: DIST_PAD.left, y1: midY, x2: W - DIST_PAD.right, y2: midY, stroke: "#c9c7c2", "stroke-width": 1 }));
+      var caseAxis = svgEl("text", { x: DIST_PAD.left + 2, y: DIST_PAD.top + 10, "font-size": 8, fill: "#9c968b" });
+      caseAxis.textContent = "cases ↑"; svg.appendChild(caseAxis);
+      var genAxis = svgEl("text", { x: DIST_PAD.left + 2, y: H - DIST_PAD.bottom - 4, "font-size": 8, fill: "#9c968b" });
+      genAxis.textContent = "genomes ↓"; svg.appendChild(genAxis);
+
       var dL = pxToDate(DIST_PAD.left), dR = pxToDate(W - DIST_PAD.right);
       var nT = Math.max(2, Math.min(6, Math.floor((W - DIST_PAD.left) / 80)));
       for (var i = 0; i <= nT; i++) {
         var t = dL + ((dR - dL) * i) / nT, x = xToPx(t);
         if (x < DIST_PAD.left - 1 || x > W - DIST_PAD.right + 1) continue;
-        svg.appendChild(svgEl("line", { x1: x, y1: baseY, x2: x, y2: baseY + 3, stroke: "#c9c7c2", "stroke-width": 1 }));
-        var xl = svgEl("text", { x: x, y: baseY + 13, "font-size": 9, fill: "#9c968b", "text-anchor": "middle" }); xl.textContent = fmtDay(t); svg.appendChild(xl);
+        svg.appendChild(svgEl("line", { x1: x, y1: midY, x2: x, y2: midY + 3, stroke: "#c9c7c2", "stroke-width": 1 }));
+        var xl = svgEl("text", { x: x, y: H - 6, "font-size": 9, fill: "#9c968b", "text-anchor": "middle" });
+        xl.textContent = fmtDay(t); svg.appendChild(xl);
       }
 
       var gbars = svgEl("g", { "clip-path": "url(#gen-dist-clip)" });
       vis.forEach(function (d) {
         var x = xToPx(d.t) - barW / 2;
-        if (d.obs > 0) gbars.appendChild(svgEl("rect", { x: x, y: yToPx(d.obs), width: barW, height: baseY - yToPx(d.obs), fill: DIST_OBS }));
-        if (showImputed && d.imp > 0) {
-          var yTop = yToPx(d.obs + d.imp), yBase = yToPx(d.obs);
-          gbars.appendChild(svgEl("rect", { x: x, y: yTop, width: barW, height: yBase - yTop, fill: DIST_IMP }));
-        }
+        var stack = 0;
+        STRATA.forEach(function (s) {
+          var n = d.cases[s.key] || 0;
+          if (n <= 0) return;
+          var yTop = yCase(stack + n), yBase = yCase(stack);
+          gbars.appendChild(svgEl("rect", { x: x, y: yTop, width: barW, height: Math.max(0, yBase - yTop), fill: s.color, opacity: 0.92 }));
+          stack += n;
+        });
+        stack = 0;
+        STRATA.forEach(function (s) {
+          var n = d.genomes[s.key] || 0;
+          if (n <= 0) return;
+          var yTop = yGen(stack), yBot = yGen(stack + n);
+          gbars.appendChild(svgEl("rect", { x: x, y: yTop, width: barW, height: Math.max(0, yBot - yTop), fill: s.color, opacity: 0.55 }));
+          stack += n;
+        });
       });
       svg.appendChild(gbars);
 
-      // Selected-tip date markers (dashed vertical lines), within the plot area.
-      markerDates.forEach(function (md) {
-        var x = xToPx(md);
-        if (x < DIST_PAD.left - 1 || x > W - DIST_PAD.right + 1) return;
-        svg.appendChild(svgEl("line", { x1: x, y1: DIST_PAD.top, x2: x, y2: baseY, stroke: "#c79a1a", "stroke-width": 1, "stroke-dasharray": "3,2", opacity: 0.85 }));
+      // Sequencing % polyline (clipped).
+      var gline = svgEl("g", { "clip-path": "url(#gen-dist-clip)" });
+      var path = "";
+      vis.forEach(function (d) {
+        if (d.pct == null) return;
+        var x = xToPx(d.t), y = yPct(Math.min(d.pct, pctMax));
+        path += (path ? " L " : "M ") + x + " " + y;
       });
+      if (path) {
+        gline.appendChild(svgEl("path", { d: path, fill: "none", stroke: PCT_COLOR, "stroke-width": 1.5, "stroke-dasharray": "3,2", opacity: 0.9 }));
+      }
+      svg.appendChild(gline);
+
+      // Tip markers on a dedicated top lane (not over the bars); dashed lines
+      // drop into the upper (cases) half only — never into the genomes half.
+      drawTipMarkers(svg, markerCounts, xToPx, DIST_PAD.left, W - DIST_PAD.right, midY);
       host.appendChild(svg); host.appendChild(tip);
 
       svg.addEventListener("mousemove", function (ev) {
@@ -564,34 +739,224 @@
         vis.forEach(function (d) { var dd = Math.abs(xToPx(d.t) - mx); if (dd < bd) { bd = dd; best = d; } });
         if (!best || bd > Math.max(barW, 8)) { tip.style.display = "none"; return; }
         var html = '<div class="ne-tip-d">' + fmtDay(best.t) + "</div>" +
-          '<div><span style="color:' + DIST_OBS + '">observed</span> <b>' + best.obs + "</b></div>";
-        if (showImputed) html += '<div><span style="color:' + DIST_IMP + '">imputed</span> <b>' + best.imp + "</b></div>";
-        tip.innerHTML = html; tip.style.display = ""; tip.style.left = Math.min(mx + 8, W - 120) + "px"; tip.style.top = (DIST_PAD.top + 4) + "px";
+          "<div>cases <b>" + best.caseTot + "</b> · genomes <b>" + best.genTot + "</b></div>";
+        if (best.pct != null) html += "<div>coverage <b>" + best.pct.toFixed(0) + "%</b></div>";
+        STRATA.forEach(function (s) {
+          var c = best.cases[s.key] || 0, g = best.genomes[s.key] || 0;
+          if (!c && !g) return;
+          html += '<div><span style="color:' + s.color + '">' + s.label + "</span> c " + c + " / g " + g + "</div>";
+        });
+        tip.innerHTML = html; tip.style.display = "";
+        tip.style.left = Math.min(mx + 8, W - 140) + "px"; tip.style.top = (DIST_PAD.top + 4) + "px";
       });
       svg.addEventListener("mouseleave", function () { tip.style.display = "none"; });
     }
 
     var impBtn = document.getElementById("gen-dist-imputed");
     applyToggleStyle(impBtn, showImputed, DIST_IMP, "rgba(88,126,114,0.15)");
-    if (impBtn) impBtn.addEventListener("click", function (e) { e.preventDefault(); showImputed = !showImputed; applyToggleStyle(impBtn, showImputed, DIST_IMP, "rgba(88,126,114,0.15)"); render(); });
+    if (impBtn) impBtn.addEventListener("click", function (e) {
+      e.preventDefault(); showImputed = !showImputed;
+      applyToggleStyle(impBtn, showImputed, DIST_IMP, "rgba(88,126,114,0.15)");
+      rebuildDays(); render();
+    });
 
     var beyBtn = document.getElementById("gen-dist-beyond");
     applyToggleStyle(beyBtn, showBeyond, "#9b7d4e", "rgba(155,125,78,0.12)");
-    if (beyBtn) beyBtn.addEventListener("click", function (e) { e.preventDefault(); showBeyond = !showBeyond; applyToggleStyle(beyBtn, showBeyond, "#9b7d4e", "rgba(155,125,78,0.12)"); render(); });
+    if (beyBtn) beyBtn.addEventListener("click", function (e) {
+      e.preventDefault(); showBeyond = !showBeyond;
+      applyToggleStyle(beyBtn, showBeyond, "#9b7d4e", "rgba(155,125,78,0.12)");
+      render();
+    });
 
     if (window.ResizeObserver) { new ResizeObserver(render).observe(host); }
     render();
-    // Reject the pre-layout/degenerate transform PearTree reports before its first
-    // fitToWindow (root≈mostRecent, ~1px wide) — it would squash the whole date axis
-    // to one pixel. Require a meaningful root→mostRecent pixel span.
     function isUsableTransform(t) {
       return !!(t && isFinite(t.offsetX) && isFinite(t.scaleX) && isFinite(t.maxX) && t.maxX > 0 && (t.maxX * t.scaleX) > 30);
     }
     return {
       setTransform: function (t) { transform = isUsableTransform(t) ? t : null; render(); },
-      setMarkers: function (dates) { markerDates = (dates || []).map(function (d) { return +new Date(d); }).filter(function (v) { return isFinite(v); }); render(); },
-      // Re-scope the bars to the given zones (summed); [] restores the national series.
+      setMarkers: function (datesOrCounts) { markerCounts = normalizeTipMarkers(datesOrCounts); render(); },
       setZones: function (zones) { scopeZones = (zones || []).slice(); rebuildDays(); render(); }
+    };
+  }
+
+  var CORR_PAD = { left: 42, right: 14, top: 14, bottom: 28 };
+  var CORR_OK = "#3d6b8a", CORR_LOW = "#c45c26", CORR_SEL = "#f2c84b";
+
+  // Scatter: confirmed cases vs genomes per health zone; flag low sequencing coverage.
+  // Clicking a point selects that health zone on the map + phylogeny (via coordinator).
+  function renderCorrPanel(genomic) {
+    var host = document.getElementById("gen-corr-body");
+    if (!host) return;
+    var od = genomic.onset_distribution || {};
+    var byZone = od.by_zone || {};
+    var tips = genomic.tips || [];
+    if (!Object.keys(byZone).length && !tips.length) {
+      host.textContent = "No zone-level case/genome data";
+      return;
+    }
+
+    var genomes = {};
+    tips.forEach(function (t) {
+      var z = realZone(t.health_zone);
+      if (!z) return;
+      genomes[z] = (genomes[z] || 0) + 1;
+    });
+
+    var rows = [];
+    var allZones = {};
+    Object.keys(byZone).forEach(function (z) { allZones[z] = 1; });
+    Object.keys(genomes).forEach(function (z) { allZones[z] = 1; });
+    Object.keys(allZones).forEach(function (z) {
+      var series = byZone[z] || {};
+      var cases = 0;
+      Object.keys(series).forEach(function (d) {
+        cases += (series[d].observed || 0) + (series[d].imputed || 0);
+      });
+      var g = genomes[z] || 0;
+      if (cases <= 0 && g <= 0) return;
+      rows.push({ zone: z, cases: cases, genomes: g, coverage: cases > 0 ? g / cases : null });
+    });
+    if (!rows.length) { host.textContent = "No zone-level case/genome data"; return; }
+
+    var totC = rows.reduce(function (s, r) { return s + r.cases; }, 0);
+    var totG = rows.reduce(function (s, r) { return s + r.genomes; }, 0);
+    var natRate = totC > 0 ? totG / totC : 0;
+    rows.forEach(function (r) {
+      r.expected = r.cases * natRate;
+      r.low = r.cases >= 3 && r.coverage != null && r.coverage < Math.max(0.01, natRate * 0.5);
+    });
+    rows.sort(function (a, b) { return (b.low - a.low) || (b.cases - a.cases); });
+
+    var tip = document.createElement("div"); tip.className = "ne-tip"; tip.style.display = "none";
+    var selectedUpper = null;   // currently highlighted zone (UPPER)
+    var zoneClickCb = null;
+    var layout = null;          // last render's xToPx/yToPx for hit-testing
+
+    function hitRow(mx, my) {
+      if (!layout) return null;
+      var best = null, bd = Infinity;
+      rows.forEach(function (r) {
+        var dx = layout.xToPx(r.cases) - mx, dy = layout.yToPx(r.genomes) - my;
+        var dd = Math.sqrt(dx * dx + dy * dy);
+        if (dd < bd) { bd = dd; best = r; }
+      });
+      return (best && bd <= 12) ? best : null;
+    }
+
+    function render() {
+      var W = host.clientWidth || 320, H = host.clientHeight || 220;
+      var xMax = Math.max(1, Math.max.apply(null, rows.map(function (r) { return r.cases; })));
+      var yMax = Math.max(1, Math.max.apply(null, rows.map(function (r) { return r.genomes; })));
+      xMax = Math.ceil(xMax * 1.05); yMax = Math.ceil(yMax * 1.05);
+      var xToPx = function (v) { return CORR_PAD.left + (v / xMax) * (W - CORR_PAD.left - CORR_PAD.right); };
+      var yToPx = function (v) { return (H - CORR_PAD.bottom) - (v / yMax) * (H - CORR_PAD.top - CORR_PAD.bottom); };
+      layout = { xToPx: xToPx, yToPx: yToPx, W: W, H: H };
+
+      host.replaceChildren();
+      var svg = svgEl("svg", { viewBox: "0 0 " + W + " " + H, preserveAspectRatio: "none", style: "cursor:default" });
+
+      niceLinearTicks(xMax).forEach(function (v) {
+        var x = xToPx(v);
+        svg.appendChild(svgEl("line", { x1: x, y1: CORR_PAD.top, x2: x, y2: H - CORR_PAD.bottom, stroke: "#eee", "stroke-width": 1 }));
+        var lbl = svgEl("text", { x: x, y: H - 8, "font-size": 9, fill: "#9c968b", "text-anchor": "middle" });
+        lbl.textContent = String(v); svg.appendChild(lbl);
+      });
+      niceLinearTicks(yMax).forEach(function (v) {
+        var y = yToPx(v);
+        svg.appendChild(svgEl("line", { x1: CORR_PAD.left, y1: y, x2: W - CORR_PAD.right, y2: y, stroke: "#eee", "stroke-width": 1 }));
+        var lbl = svgEl("text", { x: CORR_PAD.left - 4, y: y + 3, "font-size": 9, fill: "#9c968b", "text-anchor": "end" });
+        lbl.textContent = String(v); svg.appendChild(lbl);
+      });
+
+      svg.appendChild(svgEl("line", {
+        x1: CORR_PAD.left, y1: H - CORR_PAD.bottom, x2: W - CORR_PAD.right, y2: H - CORR_PAD.bottom,
+        stroke: "#c9c7c2", "stroke-width": 1
+      }));
+      svg.appendChild(svgEl("line", {
+        x1: CORR_PAD.left, y1: CORR_PAD.top, x2: CORR_PAD.left, y2: H - CORR_PAD.bottom,
+        stroke: "#c9c7c2", "stroke-width": 1
+      }));
+      var xlab = svgEl("text", { x: (CORR_PAD.left + W - CORR_PAD.right) / 2, y: H - 1, "font-size": 9, fill: "#9c968b", "text-anchor": "middle" });
+      xlab.textContent = "confirmed cases"; svg.appendChild(xlab);
+      var ylab = svgEl("text", {
+        x: 11, y: (CORR_PAD.top + H - CORR_PAD.bottom) / 2, "font-size": 9, fill: "#9c968b",
+        "text-anchor": "middle", transform: "rotate(-90 11 " + ((CORR_PAD.top + H - CORR_PAD.bottom) / 2) + ")"
+      });
+      ylab.textContent = "genomes"; svg.appendChild(ylab);
+
+      if (natRate > 0) {
+        var xEnd = Math.min(xMax, yMax / natRate);
+        var yEnd = xEnd * natRate;
+        svg.appendChild(svgEl("line", {
+          x1: xToPx(0), y1: yToPx(0), x2: xToPx(xEnd), y2: yToPx(yEnd),
+          stroke: "#9c968b", "stroke-width": 1, "stroke-dasharray": "4,3", opacity: 0.9
+        }));
+        var ref = svgEl("text", { x: xToPx(xEnd * 0.7), y: yToPx(yEnd * 0.7) - 4, "font-size": 8, fill: "#9c968b" });
+        ref.textContent = "national rate"; svg.appendChild(ref);
+      }
+
+      rows.forEach(function (r) {
+        var cx = xToPx(r.cases), cy = yToPx(r.genomes);
+        var selected = selectedUpper && up(r.zone) === selectedUpper;
+        var circle = svgEl("circle", {
+          cx: cx, cy: cy,
+          r: selected ? 7 : (r.low ? 5 : 3.5),
+          fill: selected ? CORR_SEL : (r.low ? CORR_LOW : CORR_OK),
+          opacity: selected ? 1 : (r.low ? 0.95 : 0.75),
+          stroke: selected ? "#9a7a16" : (r.low ? "#7a3410" : "none"),
+          "stroke-width": selected || r.low ? 1.5 : 0,
+          "data-zone": r.zone,
+          style: "cursor:pointer"
+        });
+        circle.addEventListener("click", function (ev) {
+          ev.stopPropagation();
+          if (zoneClickCb) zoneClickCb(r.zone);
+        });
+        svg.appendChild(circle);
+        if (r.low || selected) {
+          var lab = svgEl("text", {
+            x: cx + 6, y: cy - 4, "font-size": 8,
+            fill: selected ? "#9a7a16" : CORR_LOW, style: "pointer-events:none"
+          });
+          lab.textContent = r.zone; svg.appendChild(lab);
+        }
+      });
+
+      var legend = svgEl("text", { x: W - CORR_PAD.right, y: CORR_PAD.top + 8, "font-size": 8, fill: CORR_LOW, "text-anchor": "end" });
+      legend.textContent = "● low genome coverage · click a point to select"; svg.appendChild(legend);
+
+      host.appendChild(svg); host.appendChild(tip);
+      svg.addEventListener("mousemove", function (ev) {
+        var rect = host.getBoundingClientRect();
+        var mx = ev.clientX - rect.left, my = ev.clientY - rect.top;
+        var best = hitRow(mx, my);
+        svg.style.cursor = best ? "pointer" : "default";
+        if (!best) { tip.style.display = "none"; return; }
+        var cov = best.coverage == null ? "—" : (100 * best.coverage).toFixed(0) + "%";
+        tip.innerHTML = '<div class="ne-tip-d">' + best.zone + "</div>" +
+          "<div>cases <b>" + best.cases + "</b></div>" +
+          "<div>genomes <b>" + best.genomes + "</b></div>" +
+          "<div>coverage <b>" + cov + "</b>" + (best.low ? " · low" : "") + "</div>" +
+          '<div style="color:#9c968b;margin-top:2px">click to select on map/tree</div>';
+        tip.style.display = "";
+        tip.style.left = Math.min(mx + 8, W - 130) + "px";
+        tip.style.top = Math.max(4, my - 40) + "px";
+      });
+      svg.addEventListener("mouseleave", function () { tip.style.display = "none"; svg.style.cursor = "default"; });
+    }
+
+    if (window.ResizeObserver) { new ResizeObserver(render).observe(host); }
+    render();
+    return {
+      refresh: render,
+      // Mirror distPanel.setZones: [] clears; one or more zones highlights the first match.
+      setZones: function (zones) {
+        var z = (zones && zones.length) ? zones[0] : null;
+        selectedUpper = z ? up(z) : null;
+        render();
+      },
+      onZoneClick: function (cb) { zoneClickCb = cb; }
     };
   }
 
@@ -601,9 +966,8 @@
   // the shared map; clicking the same source again deselects (activeKey). A direct
   // tree click selects a clade and reflects its zones back onto the map. ALL tip
   // logic lives here; engine.js only exposes generic zone-level hooks.
-  function up(s) { return (s || "").toUpperCase().trim(); }
 
-  function startCoordinator(tree, hooks, tips, nePanel, distPanel) {
+  function startCoordinator(tree, hooks, tips, nePanel, distPanel, corrPanel) {
     // zone (UPPER) -> tip accessions/ids, for highlighting a zone's tips.
     var zoneToTips = {};
     (tips || []).forEach(function (t) {
@@ -618,7 +982,7 @@
     (hooks.genomeMarkers || []).forEach(function (g) { if (g.nom) nomByUpper[up(g.nom)] = g.nom; });
     function zoneNom(z) { return nomByUpper[up(z)] || z; }
 
-    var zoneSelecting = false;   // true while a marker/zone click drives the selection
+    var zoneSelecting = false;   // true while a marker/zone/corr click drives the selection
     var programmatic = false;    // true while WE mutate the tree (vs. a direct tree click)
     var activeKey = null;        // key of the current map-initiated selection (toggle-deselect)
 
@@ -627,9 +991,10 @@
       programmatic = true;
       tree.clear();              // onSelect (normal path) clears the map highlight
       programmatic = false;
+      if (corrPanel && corrPanel.setZones) corrPanel.setZones([]);
     }
 
-    // marker OR polygon → select that zone's tips; click the same source again → clear.
+    // marker OR polygon OR correlation point → select that zone's tips; click again → clear.
     // opts.toggle === false suppresses that clear: the search box empties after
     // every pick, so a user searching the same zone twice would otherwise
     // DEselect it while the map still zoomed straight to it.
@@ -649,32 +1014,37 @@
       // Scope the cases panel to this zone directly (not via the tree round-trip), so
       // it works even for a zone with confirmed cases but no genome tips.
       if (distPanel && distPanel.setZones) distPanel.setZones([zoneNom(nom)]);
+      if (corrPanel && corrPanel.setZones) corrPanel.setZones([zoneNom(nom)]);
     }
 
     hooks.onMarkerClick(function (nom, opts) { selectZone(nom, opts); });
     hooks.onZoneClick(function (nom, opts) { selectZone(nom, opts); });
     hooks.onBackgroundClick(function () { clearAll(); });
+    if (corrPanel && corrPanel.onZoneClick) {
+      corrPanel.onZoneClick(function (nom) { selectZone(nom); });
+    }
 
     // tree selection → (1) date markers on Ne/distribution (any selection source),
     // (2) map zone highlight (except when a marker/zone click already did it).
     tree.onSelect(function (ev) {
       var selected = (ev && ev.selected) || [];
-      var seen = {}, dates = [], zoneSet = {};
+      var dateCounts = {}, zoneSet = {};
       selected.forEach(function (n) {
         var a = n.annotations || {};
-        if (a.date && !seen[a.date]) { seen[a.date] = 1; dates.push(a.date); }
+        if (a.date) dateCounts[a.date] = (dateCounts[a.date] || 0) + 1;
         var z = realZone(a.health_zone);
         if (z) zoneSet[zoneNom(z)] = true;
       });
-      if (nePanel) nePanel.setMarkers(dates);
-      if (distPanel) distPanel.setMarkers(dates);
-      if (zoneSelecting) return;                     // marker/zone click already drove map + cases scope
+      if (nePanel) nePanel.setMarkers(dateCounts);
+      if (distPanel) distPanel.setMarkers(dateCounts);
+      if (zoneSelecting) return;                     // marker/zone/corr click already drove map + cases scope
       if (!programmatic) activeKey = null;           // a direct tree click isn't a toggle target
       var zoneList = Object.keys(zoneSet);
       hooks.highlightZones(zoneList);
       // Direct tree/clade selection (or a clear) re-scopes the cases panel to the union
       // of the selected tips' zones; an empty selection restores the national series.
       if (distPanel && distPanel.setZones) distPanel.setZones(zoneList);
+      if (corrPanel && corrPanel.setZones) corrPanel.setZones(zoneList);
     });
 
     // x-axis lock: keep the Ne panel's time axis aligned with the tree's live view
@@ -708,7 +1078,7 @@
       if (treeHost) new ResizeObserver(function () { raf(pushTransform); }).observe(treeHost);
     }
 
-    return { clearSelection: clearAll };
+    return { clearSelection: clearAll, selectZone: selectZone };
   }
 
   function createGenomicTab(ctx) {
@@ -719,10 +1089,13 @@
       mount: function () {
         var nePanel = renderNePanel(data);
         var distPanel = renderDistPanel(data);
+        var corrPanel = renderCorrPanel(data);
         this.treePromise = createTreePanel("gen-tree-body", data).then(function (t) {
           treeApi = t;
           var hooks = window.__bdbvMapHooks;
-          if (t && hooks) coordinator = startCoordinator(t, hooks, data.tips || [], nePanel, distPanel);
+          if (t && hooks) {
+            coordinator = startCoordinator(t, hooks, data.tips || [], nePanel, distPanel, corrPanel);
+          }
           return t;
         });
       },
