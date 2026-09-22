@@ -128,6 +128,7 @@ __all__ = [
     '_load_lab_name_map',
     '_lab_label_from_stem',
     'load_dashboard_plots',
+    'load_trends_series',
     '_parse_optional_float',
     '_parse_optional_int',
     '_parse_boolish',
@@ -4546,6 +4547,125 @@ def _pack_trends_labs(path):
 
     lab_x = {"start": min(starts), "end": max(ends)} if labs else None
     return labs, lab_x
+
+
+def _trends_x_limits(cases, deaths, positivity):
+    """Per location, the min/max date across cases U deaths U positivity.
+
+    All three cards for one selection are drawn on this range (spec 6.6), so a
+    card may show empty space where its own series does not reach the ends. That
+    is intended: without it the three cards silently disagree about time.
+    """
+    def _span(entry, length_key):
+        if not entry:
+            return None
+        start = entry["start"]
+        end = (date.fromisoformat(start) + timedelta(days=len(entry[length_key]) - 1)).isoformat()
+        return start, end
+
+    limits = {}
+    for scale, _ in _TRENDS_SCALES:
+        per_scale = {}
+        names = (set(cases.get(scale, {})) | set(deaths.get(scale, {}))
+                 | set(positivity.get(scale, {})))
+        for loc in names:
+            lo, hi = [], []
+            for span in (_span(cases.get(scale, {}).get(loc), "obs"),
+                         _span(deaths.get(scale, {}).get(loc), "cum")):
+                if span:
+                    lo.append(span[0])
+                    hi.append(span[1])
+            p = positivity.get(scale, {}).get(loc)
+            if p and p["dates"]:
+                lo.append(p["dates"][0])
+                hi.append(p["dates"][-1])
+            if lo and hi:
+                per_scale[loc] = {"start": min(lo), "end": max(hi)}
+        limits[scale] = per_scale
+    return limits
+
+
+def load_trends_series(outputs_dir=None, known_noms=None):
+    """The Trends tab's data slice, or None when the snapshot is unavailable.
+
+    Replaces load_dashboard_plots(): same directory and same manifest-driven
+    snapshot resolution, but reads the four aggregated CSVs the SVGs were
+    rendered from rather than the SVGs themselves.
+    """
+    base = Path(outputs_dir if outputs_dir is not None else DASHBOARD_PLOTS_DIR)
+    snap = _onset_manifest_dated_dir(base)
+    if snap is None:
+        print(f"  NOTE: no dated snapshot under {base}; trends charts unavailable")
+        return None
+
+    manifest = {}
+    manifest_path = base / "manifest.json"
+    if manifest_path.exists():
+        try:
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8")) or {}
+        except (json.JSONDecodeError, OSError) as exc:
+            print(f"  WARNING: invalid manifest.json: {exc}")
+
+    nom_by_norm = {_norm(n): n for n in (known_noms or ())}
+
+    def canon(name):
+        return nom_by_norm.get(_norm(name), name)
+
+    def maybe(name, fn, *args):
+        path = snap / name
+        if not path.exists():
+            print(f"  NOTE: {name} not found in {snap.name}; that card will be empty")
+            return None
+        return fn(path, *args)
+
+    cases = maybe("status_aggregated.csv", _pack_trends_cases, canon) or {}
+    deaths = maybe("cumulative_positive_deaths.csv", _pack_trends_deaths, canon) or {}
+    positivity = maybe("rolling_positivity.csv", _pack_trends_positivity, canon) or {}
+    labs_result = maybe("lab_positivity_aggregated.csv", _pack_trends_labs)
+    labs, lab_x = labs_result if labs_result else ([], None)
+
+    if not cases and not deaths and not positivity and not labs:
+        return None
+
+    days = (manifest.get("incomplete_styling") or {}).get("days")
+    try:
+        incomplete_days = int(days)
+    except (TypeError, ValueError):
+        incomplete_days = 7
+    if incomplete_days <= 0:
+        incomplete_days = 7
+
+    asof = snap.name
+    # Frozen here, at BUILD time (spec 6.7 / D7). Never recompute this in the
+    # browser: the band would drift as a page ages between builds.
+    incomplete_from = (date.fromisoformat(asof) - timedelta(days=incomplete_days)).isoformat()
+
+    def slice_of(packed, scale):
+        return packed.get(scale, {}) if packed else {}
+
+    return {
+        "asof": asof,
+        "incomplete_days": incomplete_days,
+        "incomplete_from": incomplete_from,
+        "cases": {
+            "national": slice_of(cases, "national").get("national"),
+            "provinces": slice_of(cases, "province"),
+            "health_zones": slice_of(cases, "healthzone"),
+        },
+        "deaths": {
+            "national": slice_of(deaths, "national").get("national"),
+            "provinces": slice_of(deaths, "province"),
+            "health_zones": slice_of(deaths, "healthzone"),
+        },
+        "positivity": {
+            "national": slice_of(positivity, "national").get("national"),
+            "provinces": slice_of(positivity, "province"),
+            "health_zones": slice_of(positivity, "healthzone"),
+        },
+        "labs": labs,
+        "lab_x": lab_x,
+        "x_limits": _trends_x_limits(cases, deaths, positivity),
+    }
 
 
 def _onset_manifest_dated_dir(base: Path):

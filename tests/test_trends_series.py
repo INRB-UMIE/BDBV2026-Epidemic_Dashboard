@@ -636,3 +636,186 @@ def test_deaths_blank_counts_are_read_as_zero_for_non_national_location(tmp_path
         "cum": [1, 0, 0],
         "daily": [1, 0, 0],
     }
+
+
+# --- load_trends_series assembler -------------------------------------------
+
+import json
+
+
+def _seed_snapshot(tmp_path):
+    out = tmp_path / "outputs"
+    snap = out / "2026-05-10"
+    snap.mkdir(parents=True)
+    (snap / "status_aggregated.csv").write_text(CASES_CSV, encoding="utf-8")
+    (snap / "cumulative_positive_deaths.csv").write_text(DEATHS_CSV, encoding="utf-8")
+    (snap / "rolling_positivity.csv").write_text(POS_CSV, encoding="utf-8")
+    (snap / "lab_positivity_aggregated.csv").write_text(LAB_CSV, encoding="utf-8")
+    # A newer decoy dir the manifest does NOT point at -- must be ignored.
+    decoy = out / "2026-05-11"
+    decoy.mkdir(parents=True)
+    (decoy / "status_aggregated.csv").write_text(
+        "date_of_symptom_onset_imputed,onset_date_was_imputed,confirmed_case,"
+        "spatial_scale,province,health_zone\n"
+        "2026-05-01,FALSE,999,national,NA,NA\n", encoding="utf-8")
+    (out / "manifest.json").write_text(
+        json.dumps({"date": "2026-05-10", "incomplete_styling": {"days": 5}}), encoding="utf-8")
+    return out
+
+
+def test_load_trends_series_shares_x_limits_and_freezes_the_cutoff(tmp_path, monkeypatch):
+    out = _seed_snapshot(tmp_path)
+    monkeypatch.setattr(ds, "DASHBOARD_PLOTS_DIR", out)
+
+    res = ds.load_trends_series(known_noms={"Bunia"})
+
+    assert res["asof"] == "2026-05-10"              # manifest snapshot, not the newer decoy
+    assert res["cases"]["national"]["obs"] != [999]  # decoy really was ignored
+    assert res["incomplete_days"] == 5              # read from the manifest, not hardcoded 7
+    assert res["incomplete_from"] == "2026-05-05"   # snapshot - 5 days, frozen at BUILD time
+
+    # National x-limits span cases U deaths U positivity -- spec 6.6.
+    assert res["x_limits"]["national"]["national"] == {"start": "2026-05-01", "end": "2026-05-05"}
+    assert res["lab_x"] == {"start": "2026-05-14", "end": "2026-06-01"}
+
+
+def test_load_trends_series_returns_none_when_the_snapshot_is_absent(tmp_path, monkeypatch):
+    monkeypatch.setattr(ds, "DASHBOARD_PLOTS_DIR", tmp_path / "nope")
+    assert ds.load_trends_series() is None
+
+
+# --- discriminating tests: incomplete_days defaulting ------------------------
+
+def test_load_trends_series_incomplete_days_defaults_to_seven_without_manifest_key(tmp_path):
+    out = tmp_path / "outputs"
+    snap = out / "2026-05-10"
+    snap.mkdir(parents=True)
+    (snap / "status_aggregated.csv").write_text(CASES_CSV, encoding="utf-8")
+    (out / "manifest.json").write_text(json.dumps({"date": "2026-05-10"}), encoding="utf-8")
+
+    res = ds.load_trends_series(outputs_dir=out)
+
+    assert res["incomplete_days"] == 7
+    assert res["incomplete_from"] == "2026-05-03"
+
+
+def test_load_trends_series_incomplete_days_defaults_to_seven_for_non_numeric_value(tmp_path):
+    out = tmp_path / "outputs"
+    snap = out / "2026-05-10"
+    snap.mkdir(parents=True)
+    (snap / "status_aggregated.csv").write_text(CASES_CSV, encoding="utf-8")
+    (out / "manifest.json").write_text(
+        json.dumps({"date": "2026-05-10", "incomplete_styling": {"days": "not-a-number"}}),
+        encoding="utf-8")
+
+    res = ds.load_trends_series(outputs_dir=out)
+
+    assert res["incomplete_days"] == 7
+
+
+def test_load_trends_series_incomplete_days_defaults_to_seven_for_non_positive_value(tmp_path):
+    out = tmp_path / "outputs"
+    snap = out / "2026-05-10"
+    snap.mkdir(parents=True)
+    (snap / "status_aggregated.csv").write_text(CASES_CSV, encoding="utf-8")
+    (out / "manifest.json").write_text(
+        json.dumps({"date": "2026-05-10", "incomplete_styling": {"days": 0}}),
+        encoding="utf-8")
+
+    res = ds.load_trends_series(outputs_dir=out)
+
+    assert res["incomplete_days"] == 7
+
+
+# --- discriminating test: cutoff is frozen from the snapshot date, not wall clock --
+
+def test_load_trends_series_incomplete_from_uses_snapshot_date_not_wall_clock(tmp_path):
+    # A far-future snapshot date well past this conversation's "today". If the
+    # implementation ever switched to date.today() this would still coincidentally
+    # look plausible near the real build date, but would NOT match this exact
+    # assertion -- and it must keep passing regardless of what day this test runs.
+    out = tmp_path / "outputs"
+    snap = out / "2030-01-10"
+    snap.mkdir(parents=True)
+    (snap / "status_aggregated.csv").write_text(CASES_CSV, encoding="utf-8")
+    (out / "manifest.json").write_text(
+        json.dumps({"date": "2030-01-10", "incomplete_styling": {"days": 3}}),
+        encoding="utf-8")
+
+    res = ds.load_trends_series(outputs_dir=out)
+
+    assert res["asof"] == "2030-01-10"
+    assert res["incomplete_from"] == "2030-01-07"
+
+
+# --- discriminating tests: x-limits union ------------------------------------
+
+def test_load_trends_series_x_limits_union_all_three_families(tmp_path):
+    # Each family contributes a different extreme of the span: cases the
+    # earliest date, positivity the latest. A mutation that computed x_limits
+    # from cases alone (or deaths alone) would report a narrower span.
+    out = tmp_path / "outputs"
+    snap = out / "2026-06-01"
+    snap.mkdir(parents=True)
+    (snap / "status_aggregated.csv").write_text(
+        "date_of_symptom_onset_imputed,onset_date_was_imputed,confirmed_case,"
+        "spatial_scale,province,health_zone\n"
+        "2026-03-01,FALSE,1,national,NA,NA\n", encoding="utf-8")
+    (snap / "cumulative_positive_deaths.csv").write_text(
+        "reporting_date,daily_deaths,cumulative_deaths,spatial_scale,province,health_zone\n"
+        "2026-03-10,1,1,national,NA,NA\n", encoding="utf-8")
+    (snap / "rolling_positivity.csv").write_text(
+        "date_of_symptom_onset_imputed,confirmed_case,spatial_scale,province,health_zone,"
+        "daily_positivity_mean,daily_positivity_lower,daily_positivity_upper\n"
+        "2026-03-20,1,national,NA,NA,0.5,0.2,0.8\n", encoding="utf-8")
+    (out / "manifest.json").write_text(json.dumps({"date": "2026-06-01"}), encoding="utf-8")
+
+    res = ds.load_trends_series(outputs_dir=out)
+
+    assert res["x_limits"]["national"]["national"] == {"start": "2026-03-01", "end": "2026-03-20"}
+
+
+def test_load_trends_series_x_limits_include_a_location_present_in_only_one_family(tmp_path):
+    # A health zone with positivity data but no cases/deaths rows at all must
+    # still get an x-limits entry -- an implementation that intersected the
+    # three families (or unioned only cases/deaths keys) would drop it.
+    out = tmp_path / "outputs"
+    snap = out / "2026-06-01"
+    snap.mkdir(parents=True)
+    (snap / "status_aggregated.csv").write_text(
+        "date_of_symptom_onset_imputed,onset_date_was_imputed,confirmed_case,"
+        "spatial_scale,province,health_zone\n"
+        "2026-03-01,FALSE,1,national,NA,NA\n", encoding="utf-8")
+    (snap / "cumulative_positive_deaths.csv").write_text(
+        "reporting_date,daily_deaths,cumulative_deaths,spatial_scale,province,health_zone\n"
+        "2026-03-01,1,1,national,NA,NA\n", encoding="utf-8")
+    (snap / "rolling_positivity.csv").write_text(
+        "date_of_symptom_onset_imputed,confirmed_case,spatial_scale,province,health_zone,"
+        "daily_positivity_mean,daily_positivity_lower,daily_positivity_upper\n"
+        "2026-04-05,1,healthzone,NA,OnlyPos,0.4,0.2,0.6\n", encoding="utf-8")
+    (out / "manifest.json").write_text(json.dumps({"date": "2026-06-01"}), encoding="utf-8")
+
+    res = ds.load_trends_series(outputs_dir=out)
+
+    assert "OnlyPos" not in res["cases"]["health_zones"]
+    assert "OnlyPos" not in res["deaths"]["health_zones"]
+    assert res["x_limits"]["healthzone"]["OnlyPos"] == {"start": "2026-04-05", "end": "2026-04-05"}
+
+
+# --- discriminating test: missing CSVs are tolerated -------------------------
+
+def test_load_trends_series_tolerates_missing_csvs(tmp_path):
+    out = tmp_path / "outputs"
+    snap = out / "2026-05-10"
+    snap.mkdir(parents=True)
+    (snap / "status_aggregated.csv").write_text(CASES_CSV, encoding="utf-8")
+    (out / "manifest.json").write_text(json.dumps({"date": "2026-05-10"}), encoding="utf-8")
+
+    res = ds.load_trends_series(outputs_dir=out)
+
+    assert res is not None
+    assert res["cases"]["national"] is not None
+    assert res["deaths"] == {"national": None, "provinces": {}, "health_zones": {}}
+    assert res["positivity"] == {"national": None, "provinces": {}, "health_zones": {}}
+    assert res["labs"] == []
+    assert res["lab_x"] is None
