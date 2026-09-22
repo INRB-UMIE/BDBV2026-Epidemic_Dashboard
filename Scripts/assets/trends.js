@@ -141,9 +141,55 @@
     return true;
   }
 
+  function clampPct(v) {
+    if (v === null || v === undefined) return null;
+    return Math.min(1, Math.max(0, v)) * 100;    // clamp then x100
+  }
+
+  // --- Card 3: rolling positivity -------------------------------------------
+  function renderPositivity(host, scope, key) {
+    var d = trends(), entry = pick("positivity", scope, key), lim = xLimits(scope, key);
+    if (!entry || !entry.dates.length || !lim) return false;
+    // SPARSE on purpose: entry.dates has real gaps and the line runs straight
+    // across them. Do NOT densify this.
+    var dates = entry.dates;
+    var mean = entry.mean.map(clampPct);
+    var lo = entry.lo.map(clampPct);
+    var hi = entry.hi.map(clampPct);
+    var dim = size(host), svg = newSvg(host, dim.W, dim.H);
+    var finite = hi.filter(function (v) { return v !== null; });
+    var yMax = Math.max.apply(null, finite.concat([0]));
+
+    var fr = C.frame(svg, {
+      width: dim.W, height: dim.H, pad: PAD,
+      xStart: lim.start, xEnd: lim.end, yMax: yMax   // lower bound pinned at 0
+    });
+    C.shadeRegion(svg, fr, d.incomplete_from, COLOR_INCOMPLETE);
+    // ciBand (charts.js) applies its own fixed fill-opacity:0.35 on top of
+    // whatever fill colour it is given. COLOR_POSITIVITY_BAND already bakes an
+    // alpha into itself (rgba(...,0.15)), so passing it here would compound
+    // the two opacities (0.15 x 0.35 ~= 0.05) and wash the band out far paler
+    // than intended. Pass the OPAQUE base colour instead and let ciBand supply
+    // the only opacity -- see charts.js:137-152.
+    C.ciBand(svg, fr, dates, lo, hi, COLOR_POSITIVITY);
+    C.line(svg, fr, dates, mean, COLOR_POSITIVITY, 1.6);
+    C.points(svg, fr, dates, mean, COLOR_POSITIVITY, 2, null);
+    host.appendChild(svg);
+
+    C.tooltip(host, svg, fr, function (iso) {
+      var i = dates.indexOf(iso);
+      if (i < 0) return null;
+      return '<div class="dc-tip-d">' + C.fmtDay(C.dayMs(iso)) + "</div>" +
+        "<div>" + mean[i].toFixed(1) + "%" +
+        ' <span class="dc-tip-ci">(' + lo[i].toFixed(1) + "–" + hi[i].toFixed(1) + "%)</span></div>";
+    });
+    return true;
+  }
+
   global.TrendsCharts = {
     _renderCases: renderCases,
     _renderDeaths: renderDeaths,
+    _renderPositivity: renderPositivity,
     _trends: trends,
     _xLimits: xLimits,
     _pick: pick,
