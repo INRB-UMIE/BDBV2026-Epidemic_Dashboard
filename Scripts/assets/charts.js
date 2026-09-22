@@ -145,8 +145,11 @@
     if (!up) return;
     down.reverse();
     var g = svgEl("g", { "clip-path": "url(#" + fr.clipId + ")" });
+    // No fill-opacity here: the caller passes an rgba fill carrying its own
+    // alpha, exactly as genomic.js's Ne band does. Setting an alpha here too
+    // would compound the two and wash the band out.
     g.appendChild(svgEl("path", {
-      d: up + "L" + down.join("L") + "Z", fill: fill, "fill-opacity": 0.35, stroke: "none"
+      d: up + "L" + down.join("L") + "Z", fill: fill, stroke: "none"
     }));
     svg.appendChild(g);
   }
@@ -194,18 +197,32 @@
 
   // Right-hand axis that RELABELS the same pixel range -- it never moves a
   // mark. `fmt` maps a primary-axis value to its secondary-axis label.
-  function dualAxis(svg, fr, name, fmt) {
-    fr.ticks.forEach(function (v) {
-      var y = fr.yToPx(v);
-      var lbl = svgEl("text", { x: fr.right + 4, y: y + 3, "font-size": 9, fill: "#9c968b", "text-anchor": "start" });
-      lbl.textContent = fmt(v);
+  // Right-hand axis on its OWN scale. `secMax` is the value that corresponds to
+  // the primary axis's full height, so the two axes are alternate readings of
+  // the same pixel range -- this moves no mark.
+  //
+  // Ticks are generated on the secondary scale rather than relabelling the
+  // primary ones, so a percentage axis reads 0/25/50/75/100 instead of whatever
+  // the primary breaks happen to map to (relabelling gave 0/23/47/70/93).
+  function dualAxis(svg, fr, name, secMax) {
+    if (!(secMax > 0)) return;
+    niceLinearTicks(secMax).forEach(function (v) {
+      if (v > secMax) return;
+      var y = fr.yToPx((v / secMax) * fr.yMax);
+      svg.appendChild(svgEl("line", {
+        x1: fr.right, y1: y, x2: fr.right + 3, y2: y, stroke: "#c9c7c2", "stroke-width": 1
+      }));
+      var lbl = svgEl("text", {
+        x: fr.right + 6, y: y + 3, "font-size": 9, fill: "#9c968b", "text-anchor": "start"
+      });
+      lbl.textContent = String(v);
       svg.appendChild(lbl);
     });
     if (!name) return;
     var cy = (fr.top + fr.baseY) / 2;
     var t = svgEl("text", {
-      x: fr.right + 16, y: cy, "font-size": 9, fill: "#9c968b",
-      "text-anchor": "middle", transform: "rotate(90 " + (fr.right + 16) + " " + cy + ")"
+      x: fr.right + 30, y: cy, "font-size": 9, fill: "#9c968b",
+      "text-anchor": "middle", transform: "rotate(90 " + (fr.right + 30) + " " + cy + ")"
     });
     t.textContent = name;
     svg.appendChild(t);

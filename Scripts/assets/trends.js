@@ -165,13 +165,9 @@
       xStart: lim.start, xEnd: lim.end, yMax: yMax   // lower bound pinned at 0
     });
     C.shadeRegion(svg, fr, d.incomplete_from, COLOR_INCOMPLETE);
-    // ciBand (charts.js) applies its own fixed fill-opacity:0.35 on top of
-    // whatever fill colour it is given. COLOR_POSITIVITY_BAND already bakes an
-    // alpha into itself (rgba(...,0.15)), so passing it here would compound
-    // the two opacities (0.15 x 0.35 ~= 0.05) and wash the band out far paler
-    // than intended. Pass the OPAQUE base colour instead and let ciBand supply
-    // the only opacity -- see charts.js:137-152.
-    C.ciBand(svg, fr, dates, lo, hi, COLOR_POSITIVITY);
+    // The band's alpha lives in COLOR_POSITIVITY_BAND itself; ciBand sets no
+    // opacity of its own, matching genomic.js's Ne band.
+    C.ciBand(svg, fr, dates, lo, hi, COLOR_POSITIVITY_BAND);
     C.line(svg, fr, dates, mean, COLOR_POSITIVITY, 1.6);
     C.points(svg, fr, dates, mean, COLOR_POSITIVITY, 2, null);
     host.appendChild(svg);
@@ -229,7 +225,7 @@
     };
     // Same opaque-fill reasoning as renderPositivity: ciBand's own
     // fill-opacity:0.35 is the only opacity applied here.
-    C.ciBand(svg, fr, dates, lab.lo.map(sc), lab.hi.map(sc), COLOR_POSITIVITY);
+    C.ciBand(svg, fr, dates, lab.lo.map(sc), lab.hi.map(sc), COLOR_POSITIVITY_BAND);
     C.line(svg, fr, dates, lab.mean.map(sc), COLOR_POSITIVITY, 1.6);
     C.points(svg, fr, dates, lab.mean.map(sc), COLOR_POSITIVITY, 2, null);
     C.markerLine(svg, fr, lab.earliest, COLOR_INK,
@@ -238,9 +234,7 @@
     // Secondary axis relabelled 0-100. The source emits a 0-1 proportion under
     // a "(%)" label; this is a LABEL change only -- every mark above is placed
     // on the primary axis, so nothing moves.
-    C.dualAxis(svg, fr, tr("ui.trends_axis_positivity", "Sample Positivity (%)"), function (v) {
-      return String(Math.round((v / maxTotal) * 100));
-    });
+    C.dualAxis(svg, fr, tr("ui.trends_axis_positivity", "Sample Positivity (%)"), 100);
     host.appendChild(svg);
 
     C.tooltip(host, svg, fr, function (iso) {
