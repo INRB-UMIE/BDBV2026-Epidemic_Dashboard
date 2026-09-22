@@ -22,7 +22,7 @@ Please note that the epidemiological data presented here is based on work in pro
 - **health_zone_metadata.csv** Metadata file for dashboard, see below. 
 - **ic_model_estimates.csv** (optional) Imperial College model date and case bounds for the tracker tooltip (`PAYLOAD.ic_model`; independent of INSP sitreps).
 - **caveats.csv** (optional) Per-metric warnings in the title-panel tracker: `metric` (`confirmed_cases`, `suspected_cases`, `confirmed_deaths`, `suspected_deaths`) and `warning` text; adds a mark beside the count and a footnote below.
-- **dashboard_plots/** (optional) Pre-built province/health-zone SVG charts for the Trends tab (`manifest.json` + `<date>/dashboard_plots/...`), produced by [BDBV2026-Processed_Sensitive_Data](https://github.com/INRB-UMIE/BDBV2026-Processed_Sensitive_Data)'s `outputs/` directory. The build reads this directly, no copying into `Data/dashboard_plots/` needed. By default it assumes that repo is cloned as a sibling of this one (`../BDBV2026-Processed_Sensitive_Data/outputs`), same convention as `BUILD_DIR`/`BDBV2026-Data` below; set the `DASHBOARD_PLOTS_DIR` environment variable to override.
+- **dashboard_plots/** (optional) The aggregated CSVs the Trends tab charts are drawn from (`manifest.json` + `<date>/{status_aggregated,cumulative_positive_deaths,rolling_positivity,lab_positivity_aggregated}.csv`), produced by [BDBV2026-Processed_Sensitive_Data](https://github.com/INRB-UMIE/BDBV2026-Processed_Sensitive_Data)'s `outputs/` directory. The build reads this directly, no copying into `Data/dashboard_plots/` needed. By default it assumes that repo is cloned as a sibling of this one (`../BDBV2026-Processed_Sensitive_Data/outputs`); set `DASHBOARD_PLOTS_DIR` to override. The same directory also holds pre-rendered SVGs of these charts, which the dashboard **no longer reads** — it draws them client-side from the CSVs instead (see `Scripts/assets/trends.js` and `Scripts/assets/charts.js`). The charts must stay faithful to the *data* produced by `BDBV2026-Processing_Code`'s `4-make-dashboard-plots.R`; their visual style follows the Genomic Epidemiology tab. See `docs/superpowers/specs/2026-09-22-trends-dynamic-charts-design.md`.
 - **Methods** Methods for dashboard, see below.
 - **ToS** ToS for dashboard, see below. 
 
@@ -110,7 +110,7 @@ BDBV-Epidemic_Dashboard/
 │   ├── health_zone_metadata.csv    # fallback fields (relative risk, population bounds, etc.)
 │   ├── ic_model_estimates.csv      # optional Imperial College bounds for tracker tooltip
 │   ├── caveats.csv                 # optional tracker footnotes (metric + warning)
-│   ├── dashboard_plots/            # optional Trends-page SVGs (manifest.json + *.svg)
+│   ├── dashboard_plots/            # optional Trends-page CSVs (manifest.json + *.csv)
 │   ├── Methods/Contributors_Methods_Data_website.docx
 │   ├── ToS/Terms of Use.txt
 │   └── Branding/                   # partner logos, urls.txt, dashboard-theme.css (cream theme)
@@ -279,7 +279,7 @@ Workflow [`.github/workflows/build-dashboard.yml`](.github/workflows/build-dashb
 | Source | Repo | Ref used |
 |---|---|---|
 | Geometry & datasets | [`BDBV2026-Data`](https://github.com/INRB-UMIE/BDBV2026-Data) | Latest GitHub **release** (or the exact commit dispatched after a data release) |
-| Trends-tab SVGs | [`BDBV2026-Processed_Sensitive_Data`](https://github.com/INRB-UMIE/BDBV2026-Processed_Sensitive_Data) (`outputs/`) | `main` |
+| Trends-tab series CSVs | [`BDBV2026-Processed_Sensitive_Data`](https://github.com/INRB-UMIE/BDBV2026-Processed_Sensitive_Data) (`outputs/`) | `main` |
 | Dashboard config & copy | this repo | triggering commit on `main` |
 
 The processed-data repo is checked out to `BDBV2026-Processed_Sensitive_Data/`
