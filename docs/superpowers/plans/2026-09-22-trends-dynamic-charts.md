@@ -79,6 +79,9 @@ CASES_CSV = (
     "2026-05-02,FALSE,0,50,50,50,50,healthzone,NA,Nyarambe\n"
     # unparseable / blank dates are dropped
     ",FALSE,7,0,0,0,0,national,NA,NA\n"
+    # blank confirmed_case on an otherwise valid row: R's to_int() reads this
+    # as 0, so it must NOT crash and must NOT change any count
+    "2026-05-04,FALSE,,0,0,0,0,national,NA,NA\n"
 )
 
 
@@ -95,6 +98,23 @@ def test_cases_packs_accumulates_trims_and_zero_fills(tmp_path):
     assert out["province"]["Ituri"] == {"start": "2026-05-02", "obs": [4], "imp": [0]}
     assert out["healthzone"]["Bunia"] == {"start": "2026-05-02", "obs": [1], "imp": [0]}
     assert "Nyarambe" not in out["healthzone"]   # zero-total location skipped (spec 6.1)
+
+
+def test_blank_counts_are_read_as_zero_not_crashes(tmp_path):
+    # R's to_int() returns 0L for blank/NA/non-numeric. _i() returns None for
+    # those, and `int += None` raises -- so counts must go through _i0().
+    csv_text = (
+        "date_of_symptom_onset_imputed,onset_date_was_imputed,confirmed_case,"
+        "spatial_scale,province,health_zone\n"
+        "2026-05-01,FALSE,1,national,NA,NA\n"
+        "2026-05-02,FALSE,,national,NA,NA\n"
+        "2026-05-03,FALSE,notanumber,national,NA,NA\n"
+    )
+    (tmp_path / "status_aggregated.csv").write_text(csv_text, encoding="utf-8")
+
+    out = ds._pack_trends_cases(tmp_path / "status_aggregated.csv")
+
+    assert out["national"]["national"] == {"start": "2026-05-01", "obs": [1, 0, 0], "imp": [0, 0, 0]}
 ```
 
 - [ ] **Step 2: Run the test to verify it fails**
@@ -131,6 +151,16 @@ def _trends_loc(row, key_field):
     return name
 
 
+def _i0(value):
+    """Integer count, with blank/NA/non-numeric read as 0.
+
+    Mirrors the generator's to_int(): R returns 0L for NULL/NA/empty rather
+    than erroring, so a blank count column means "no cases", not "crash".
+    _i() alone returns None for those, which would blow up the accumulators.
+    """
+    return _i(value) or 0
+
+
 def _day_range(start, end):
     """Inclusive list of ISO dates from start to end."""
     s = date.fromisoformat(start)
@@ -158,7 +188,7 @@ def _pack_trends_cases(path, canon=None):
                 continue
             slot = "imp" if (row.get("onset_date_was_imputed") or "").strip().upper() == "TRUE" else "obs"
             entry = buckets[scale].setdefault(loc, {}).setdefault(day, {"obs": 0, "imp": 0})
-            entry[slot] += _i(row.get("confirmed_case"))   # ACCUMULATE
+            entry[slot] += _i0(row.get("confirmed_case"))   # ACCUMULATE
 
     packed = {scale: {} for scale, _ in _TRENDS_SCALES}
     for scale, by_loc in buckets.items():
@@ -190,7 +220,7 @@ from datetime import date, timedelta
 cd Scripts && python3.9 -m pytest ../tests/test_trends_series.py -v
 ```
 
-Expected: `1 passed`.
+Expected: `2 passed`.
 
 - [ ] **Step 5: Commit**
 
@@ -275,7 +305,7 @@ def _pack_trends_deaths(path, canon=None):
                 continue
             # OVERWRITE, last row wins -- deliberately unlike _pack_trends_cases
             buckets[scale].setdefault(loc, {})[day] = (
-                _i(row.get("daily_deaths")), _i(row.get("cumulative_deaths"))
+                _i0(row.get("daily_deaths")), _i0(row.get("cumulative_deaths"))
             )
 
     packed = {scale: {} for scale, _ in _TRENDS_SCALES}
@@ -302,7 +332,7 @@ def _pack_trends_deaths(path, canon=None):
 cd Scripts && python3.9 -m pytest ../tests/test_trends_series.py -v
 ```
 
-Expected: `2 passed`.
+Expected: `3 passed`.
 
 - [ ] **Step 5: Commit**
 
@@ -419,7 +449,7 @@ def _pack_trends_positivity(path, canon=None):
 cd Scripts && python3.9 -m pytest ../tests/test_trends_series.py -v
 ```
 
-Expected: `3 passed`.
+Expected: `4 passed`.
 
 - [ ] **Step 5: Commit**
 
@@ -518,7 +548,7 @@ def _pack_trends_labs(path):
                 "rows": {},
             })
             lab["rows"][day] = (
-                _i(row.get("total_samples_analysed_daily")),
+                _i0(row.get("total_samples_analysed_daily")),
                 mean,
                 _parse_optional_float(row.get("daily_positivity_lower")),
                 _parse_optional_float(row.get("daily_positivity_upper")),
@@ -558,7 +588,7 @@ def _pack_trends_labs(path):
 cd Scripts && python3.9 -m pytest ../tests/test_trends_series.py -v
 ```
 
-Expected: `4 passed`.
+Expected: `5 passed`.
 
 - [ ] **Step 5: Commit**
 
@@ -764,7 +794,7 @@ Add `'load_trends_series'` to `__all__` in `Scripts/common/data_sources.py`, nex
 cd Scripts && python3.9 -m pytest ../tests/test_trends_series.py -v
 ```
 
-Expected: `6 passed`.
+Expected: `7 passed`.
 
 - [ ] **Step 5: Simplify `_trends_x_limits`**
 
@@ -777,7 +807,7 @@ The `hi.append(...)` / `hi[-1] = ...` sequence in the `cases` branch above is re
                 hi.append((date.fromisoformat(c["start"]) + timedelta(days=len(c["obs"]) - 1)).isoformat())
 ```
 
-Re-run: `cd Scripts && python3.9 -m pytest ../tests/test_trends_series.py -v` — expected `6 passed`.
+Re-run: `cd Scripts && python3.9 -m pytest ../tests/test_trends_series.py -v` — expected `7 passed`.
 
 - [ ] **Step 6: Commit**
 
@@ -871,7 +901,7 @@ and in the returned dict replace `"onset_trends": onset_trends,` with:
 cd Scripts && python3.9 -m pytest ../tests/test_trends_payload_scoping.py ../tests/test_trends_series.py -v
 ```
 
-Expected: `8 passed`.
+Expected: `9 passed`.
 
 - [ ] **Step 5: Commit**
 
