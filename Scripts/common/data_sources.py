@@ -4311,6 +4311,16 @@ def _trends_loc(row, key_field):
     return name
 
 
+def _i0(value):
+    """Integer count, with blank/NA/non-numeric read as 0.
+
+    Mirrors the generator's to_int(): R returns 0L for NULL/NA/empty rather
+    than erroring, so a blank count column means "no cases", not "crash".
+    _i() alone returns None for those, which would blow up the accumulators.
+    """
+    return _i(value) or 0
+
+
 def _day_range(start, end):
     """Inclusive list of ISO dates from start to end."""
     s = date.fromisoformat(start)
@@ -4338,7 +4348,7 @@ def _pack_trends_cases(path, canon=None):
                 continue
             slot = "imp" if (row.get("onset_date_was_imputed") or "").strip().upper() == "TRUE" else "obs"
             entry = buckets[scale].setdefault(loc, {}).setdefault(day, {"obs": 0, "imp": 0})
-            entry[slot] += _i(row.get("confirmed_case"))   # ACCUMULATE
+            entry[slot] += _i0(row.get("confirmed_case"))   # ACCUMULATE
 
     packed = {scale: {} for scale, _ in _TRENDS_SCALES}
     for scale, by_loc in buckets.items():
