@@ -606,3 +606,17 @@ body.trends-splitting #trends-split-handle::before {
    #site-header now, full-width and identical across all four pages -- see
    Scripts/common/chrome.py and the "Multi-page structure" README section. */
 
+
+/* ── Trends runtime charts ───────────────────────────────── */
+/* The base sheet already styles these to match the genomic panels; the theme
+   layer only re-points them at the brand tokens. Deliberately NOT styling
+   `.dc-chart svg text` -- charts.js sets each text element's fill inline, and a
+   CSS `fill` would override every one of them, including the lab charts'
+   "Earliest Sample" marker label. */
+.dc-tip {
+  background: rgba(255, 255, 255, 0.97) !important;
+  color: var(--ink) !important;
+  border-color: var(--border) !important;
+}
+.dc-tip-ci { color: var(--muted) !important; }
+.dc-caption { color: var(--muted) !important; }

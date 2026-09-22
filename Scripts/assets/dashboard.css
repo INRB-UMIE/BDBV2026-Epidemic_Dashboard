@@ -884,8 +884,28 @@
   .context-pillar.pillar-epidemiological-security { border-left-color:#ec7063; }
   .context-pillar.pillar-epidemiological-community-engagement { border-left-color:#58d68d; }
   .context-pillar.pillar-epidemiological-protection-sexual-exploitation-abuse { border-left-color:#c39bd3; }
-  .onset-chart-wrap { width:100%; margin-top:4px; }
-  .onset-chart-wrap svg { width:100%; max-width:100%; height:auto; display:block; }
+  /* Runtime-drawn Trends chart bodies (trends.js on charts.js). Mirrors the
+     genomic tab's .gen-chart / .ne-tip deliberately: the two tabs should read
+     as one system, and the genomic panels are the reference. Replaces
+     .onset-chart-wrap, which wrapped the pre-rendered SVG images. */
+  .dc-chart { position: relative; height: 180px; min-height: 180px; }
+  .dc-chart svg { display: block; width: 100%; height: 100%; }
+  .dc-tip {
+    position: absolute; pointer-events: none; z-index: 5;
+    background: rgba(255,255,255,0.97); border: 1px solid #e7e3db; border-radius: 6px;
+    padding: 4px 7px; font-size: 10.5px; color: #2a2a27; white-space: nowrap;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.12);
+  }
+  .dc-tip-d { font-weight: 700; margin-bottom: 2px; }
+  .dc-tip-ci { color: #9c968b; }
+  .dc-sw {
+    display: inline-block; width: 8px; height: 8px; margin-right: 4px;
+    border-radius: 1px; vertical-align: middle;
+  }
+  /* The old SVG images carried this caption baked in; it is still shown, as
+     text, because it explains what the chart counts. */
+  .dc-caption { margin: 6px 0 0; font-size: 10px; line-height: 1.35; color: #9c968b; }
+  .trends-lab-subplot { margin-bottom: 12px; }
 
   /* Cacher le contenu quand réduit */
   .panel.collapsed .panel-body {
