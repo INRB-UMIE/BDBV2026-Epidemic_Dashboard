@@ -1194,7 +1194,7 @@ git commit -m "Add shared runtime-SVG chart primitives"
 
 ### Task 8: `trends.js` — module shell and the confirmed-cases card
 
-**Fidelity (§6.2):** stacked bars, **observed at the bottom** (`#b23b2e`), imputed on top (`#f1ccc6`); y-axis `Cases`; no positivity overlay.
+**Fidelity (§6.2):** stacked bars, **observed at the bottom** (`#9B7D4E`), imputed on top (`#C9A266`); y-axis `Cases`; no positivity overlay.
 
 **Files:**
 - Create: `Scripts/assets/trends.js`
