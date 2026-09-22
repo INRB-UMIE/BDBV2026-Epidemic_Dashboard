@@ -802,6 +802,64 @@ def test_load_trends_series_x_limits_include_a_location_present_in_only_one_fami
     assert res["x_limits"]["healthzone"]["OnlyPos"] == {"start": "2026-04-05", "end": "2026-04-05"}
 
 
+def test_load_trends_series_x_limits_deaths_span_sets_both_extremes(tmp_path):
+    # Deaths' own start/end must feed lo/hi, not just its location key. Cases
+    # and positivity both sit STRICTLY INSIDE deaths' range here, so if the
+    # deaths span were dropped from the lo/hi accumulation (while deaths stayed
+    # in the location-membership union), the result would narrow to the cases/
+    # positivity range instead of spanning out to deaths' own dates.
+    out = tmp_path / "outputs"
+    snap = out / "2026-06-01"
+    snap.mkdir(parents=True)
+    (snap / "status_aggregated.csv").write_text(
+        "date_of_symptom_onset_imputed,onset_date_was_imputed,confirmed_case,"
+        "spatial_scale,province,health_zone\n"
+        "2026-03-05,FALSE,1,national,NA,NA\n", encoding="utf-8")
+    (snap / "cumulative_positive_deaths.csv").write_text(
+        "reporting_date,daily_deaths,cumulative_deaths,spatial_scale,province,health_zone\n"
+        "2026-02-01,1,1,national,NA,NA\n"
+        "2026-04-01,1,2,national,NA,NA\n", encoding="utf-8")
+    (snap / "rolling_positivity.csv").write_text(
+        "date_of_symptom_onset_imputed,confirmed_case,spatial_scale,province,health_zone,"
+        "daily_positivity_mean,daily_positivity_lower,daily_positivity_upper\n"
+        "2026-03-10,1,national,NA,NA,0.4,0.2,0.6\n", encoding="utf-8")
+    (out / "manifest.json").write_text(json.dumps({"date": "2026-06-01"}), encoding="utf-8")
+
+    res = ds.load_trends_series(outputs_dir=out)
+
+    # deaths' 2026-02-01 start and 2026-04-01 end lie OUTSIDE both the cases
+    # (2026-03-05) and positivity (2026-03-10) dates on either side.
+    assert res["x_limits"]["national"]["national"] == {"start": "2026-02-01", "end": "2026-04-01"}
+
+
+def test_load_trends_series_x_limits_include_a_location_present_only_in_deaths(tmp_path):
+    # A health zone with deaths data but no cases/positivity rows at all must
+    # still get an x-limits entry -- mirrors the positivity-only coverage
+    # above, for the deaths family.
+    out = tmp_path / "outputs"
+    snap = out / "2026-06-01"
+    snap.mkdir(parents=True)
+    (snap / "status_aggregated.csv").write_text(
+        "date_of_symptom_onset_imputed,onset_date_was_imputed,confirmed_case,"
+        "spatial_scale,province,health_zone\n"
+        "2026-03-01,FALSE,1,national,NA,NA\n", encoding="utf-8")
+    (snap / "cumulative_positive_deaths.csv").write_text(
+        "reporting_date,daily_deaths,cumulative_deaths,spatial_scale,province,health_zone\n"
+        "2026-03-01,1,1,national,NA,NA\n"
+        "2026-04-05,1,1,healthzone,NA,OnlyDeaths\n", encoding="utf-8")
+    (snap / "rolling_positivity.csv").write_text(
+        "date_of_symptom_onset_imputed,confirmed_case,spatial_scale,province,health_zone,"
+        "daily_positivity_mean,daily_positivity_lower,daily_positivity_upper\n"
+        "2026-03-01,1,national,NA,NA,0.4,0.2,0.6\n", encoding="utf-8")
+    (out / "manifest.json").write_text(json.dumps({"date": "2026-06-01"}), encoding="utf-8")
+
+    res = ds.load_trends_series(outputs_dir=out)
+
+    assert "OnlyDeaths" not in res["cases"]["health_zones"]
+    assert "OnlyDeaths" not in res["positivity"]["health_zones"]
+    assert res["x_limits"]["healthzone"]["OnlyDeaths"] == {"start": "2026-04-05", "end": "2026-04-05"}
+
+
 # --- discriminating test: missing CSVs are tolerated -------------------------
 
 def test_load_trends_series_tolerates_missing_csvs(tmp_path):
@@ -819,3 +877,56 @@ def test_load_trends_series_tolerates_missing_csvs(tmp_path):
     assert res["positivity"] == {"national": None, "provinces": {}, "health_zones": {}}
     assert res["labs"] == []
     assert res["lab_x"] is None
+
+
+# --- discriminating test: all four families empty guards return None --------
+
+def test_load_trends_series_returns_none_when_snapshot_dir_has_none_of_the_four_csvs(tmp_path):
+    # The snapshot DIRECTORY genuinely exists and the manifest resolves it --
+    # unlike test_..._returns_none_when_the_snapshot_is_absent, which exercises
+    # the EARLIER `snap is None` branch for a missing directory. This exercises
+    # the separate `if not cases and not deaths and not positivity and not
+    # labs: return None` guard once a snapshot dir is found but is empty of
+    # every one of the four source CSVs.
+    out = tmp_path / "outputs"
+    snap = out / "2026-05-10"
+    snap.mkdir(parents=True)
+    (out / "manifest.json").write_text(json.dumps({"date": "2026-05-10"}), encoding="utf-8")
+
+    assert ds.load_trends_series(outputs_dir=out) is None
+
+
+def test_load_trends_series_is_not_none_when_csvs_are_present_but_header_only(tmp_path):
+    # Distinct from the case above: every CSV file EXISTS but has zero data
+    # rows. Each packer still returns its scale skeleton ({"national": {},
+    # "province": {}, "healthzone": {}}), which is truthy even though every
+    # sub-dict is empty -- so the "all four families empty" guard does NOT
+    # fire here, and the result comes back usable (all slices empty) rather
+    # than None. This pins that distinction rather than leaving it accidental.
+    out = tmp_path / "outputs"
+    snap = out / "2026-05-10"
+    snap.mkdir(parents=True)
+    (snap / "status_aggregated.csv").write_text(
+        "date_of_symptom_onset_imputed,onset_date_was_imputed,confirmed_case,"
+        "spatial_scale,province,health_zone\n", encoding="utf-8")
+    (snap / "cumulative_positive_deaths.csv").write_text(
+        "reporting_date,daily_deaths,cumulative_deaths,spatial_scale,province,health_zone\n",
+        encoding="utf-8")
+    (snap / "rolling_positivity.csv").write_text(
+        "date_of_symptom_onset_imputed,confirmed_case,spatial_scale,province,health_zone,"
+        "daily_positivity_mean,daily_positivity_lower,daily_positivity_upper\n", encoding="utf-8")
+    (snap / "lab_positivity_aggregated.csv").write_text(
+        "lab_name,lab_name_long,health_zone,province,lab_analysis_date,earliest_analysed_sample,"
+        "confirmed_case,total_samples_analysed_daily,rolling_confirmed,rolling_total,"
+        "daily_positivity_mean,daily_positivity_lower,daily_positivity_upper\n", encoding="utf-8")
+    (out / "manifest.json").write_text(json.dumps({"date": "2026-05-10"}), encoding="utf-8")
+
+    res = ds.load_trends_series(outputs_dir=out)
+
+    assert res is not None
+    assert res["cases"] == {"national": None, "provinces": {}, "health_zones": {}}
+    assert res["deaths"] == {"national": None, "provinces": {}, "health_zones": {}}
+    assert res["positivity"] == {"national": None, "provinces": {}, "health_zones": {}}
+    assert res["labs"] == []
+    assert res["lab_x"] is None
+    assert res["x_limits"] == {"national": {}, "province": {}, "healthzone": {}}

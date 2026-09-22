@@ -108,12 +108,6 @@ def build_shared_payload() -> dict:
     province_boundaries = build_province_boundaries()
     print(f"  province boundaries: {len(province_boundaries['features'])} provinces")
 
-    zone_noms = sorted(zone_data.keys())
-    province_names = sorted({
-        str((feat.get("properties") or {}).get("province") or "").strip()
-        for feat in (province_boundaries.get("features") or [])
-        if (feat.get("properties") or {}).get("province")
-    })
     trends = load_trends_series(known_noms=set(zone_data))
     if trends:
         print(f"  trends: asof {trends['asof']}, "
