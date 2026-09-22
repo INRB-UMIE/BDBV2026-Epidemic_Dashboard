@@ -4429,6 +4429,59 @@ def _pack_trends_deaths(path, canon=None):
     return packed
 
 
+def _pack_trends_positivity(path, canon=None):
+    """{scale: {location: {dates[], mean[], lo[], hi[]}}} from rolling_positivity.csv.
+
+    SPARSE by design: only dates present in the CSV appear. The chart's line
+    connects straight across gaps (geom_line does); zero-filling here would
+    invent troughs that are not in the data.
+
+    Values are proportions at full precision. The x100 to percent happens at
+    render time so the stored numbers stay byte-identical to the source.
+    """
+    canon = canon or (lambda s: s)
+    buckets = {scale: {} for scale, _ in _TRENDS_SCALES}
+    with open(path, newline="", encoding="utf-8") as fh:
+        for row in csv.DictReader(fh):
+            scale = (row.get("spatial_scale") or "").strip().lower()
+            key_field = _TRENDS_SCALE_MAP.get(scale, _UNKNOWN_SCALE)
+            if key_field is _UNKNOWN_SCALE:
+                continue
+            loc = _trends_loc(row, key_field)
+            if loc is None:
+                continue
+            if key_field == "health_zone":
+                # canon maps to canonical health-zone noms, so it applies to
+                # zones ONLY. Province names are a different namespace; several
+                # DRC provinces share a name with a health zone (Ituri, Tshopo,
+                # Kinshasa...), so running provinces through it would silently
+                # rewrite a province to a zone's spelling if the two ever drift.
+                loc = canon(loc)
+            day = (row.get("date_of_symptom_onset_imputed") or "").strip()
+            if not _ONSET_DATE_RE.match(day):
+                continue
+            trio = (
+                _parse_optional_float(row.get("daily_positivity_mean")),
+                _parse_optional_float(row.get("daily_positivity_lower")),
+                _parse_optional_float(row.get("daily_positivity_upper")),
+            )
+            if trio[0] is None:
+                continue
+            buckets[scale].setdefault(loc, {})[day] = trio   # OVERWRITE, last wins
+
+    packed = {scale: {} for scale, _ in _TRENDS_SCALES}
+    for scale, by_loc in buckets.items():
+        for loc, by_day in by_loc.items():
+            days = sorted(by_day)
+            packed[scale][loc] = {
+                "dates": days,
+                "mean": [by_day[d][0] for d in days],
+                "lo": [by_day[d][1] for d in days],
+                "hi": [by_day[d][2] for d in days],
+            }
+    return packed
+
+
 def _onset_manifest_dated_dir(base: Path):
     """The dated ``outputs/<date>/`` dir the onset SVGs are read from.
 

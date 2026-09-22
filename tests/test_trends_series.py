@@ -260,3 +260,131 @@ def test_spatial_scale_is_normalised_for_case_and_whitespace(tmp_path):
 
     assert out["national"]["national"] == {"start": "2026-05-01", "cum": [1], "daily": [1]}
     assert out["healthzone"]["Bunia"] == {"start": "2026-05-01", "cum": [2], "daily": [2]}
+
+
+# --- positivity packer (sparse) ---------------------------------------------
+
+POS_CSV = (
+    "country,date_of_symptom_onset_imputed,confirmed_case,total_samples_analysed_daily,"
+    "spatial_scale,province,health_zone,rolling_confirmed,rolling_total,"
+    "daily_positivity_mean,daily_positivity_lower,daily_positivity_upper\n"
+    "NA,2026-05-01,1,1,national,NA,NA,1,1,0.206549314377238,0.1,0.9\n"
+    # 05-02 absent: must stay ABSENT, not zero-filled (spec 6.4)
+    "NA,2026-05-03,0,1,national,NA,NA,0,1,0.5,0.25,0.75\n"
+    # duplicate date: last row WINS
+    "NA,2026-05-03,0,1,national,NA,NA,0,1,0.6,0.3,0.8\n"
+    "NA,2026-05-01,1,1,healthzone,NA,Nyankunde,1,1,1,0.2,1\n"
+)
+
+
+def test_positivity_is_sparse_overwrites_and_keeps_full_precision(tmp_path):
+    (tmp_path / "rolling_positivity.csv").write_text(POS_CSV, encoding="utf-8")
+
+    out = ds._pack_trends_positivity(tmp_path / "rolling_positivity.csv", canon=lambda s: s)
+
+    nat = out["national"]["national"]
+    assert nat["dates"] == ["2026-05-01", "2026-05-03"]     # 05-02 NOT invented
+    assert nat["mean"] == [0.206549314377238, 0.6]          # full precision; duplicate overwrote
+    assert nat["lo"] == [0.1, 0.3]
+    assert nat["hi"] == [0.9, 0.8]
+    assert out["healthzone"]["Nyankunde"]["mean"] == [1.0]  # proportion, NOT scaled to 100 here
+
+
+def test_positivity_gap_stays_absent_not_densified(tmp_path):
+    # A multi-day gap must leave the missing dates out of `dates` entirely --
+    # unlike deaths (carry-forward) and cases (zero-fill), positivity never
+    # invents an entry for a day the CSV doesn't have a row for.
+    csv_text = (
+        "date_of_symptom_onset_imputed,confirmed_case,spatial_scale,province,health_zone,"
+        "daily_positivity_mean,daily_positivity_lower,daily_positivity_upper\n"
+        "2026-05-01,1,national,NA,NA,0.1,0.05,0.15\n"
+        # 05-02 through 05-09 absent -- an 8-day gap
+        "2026-05-10,1,national,NA,NA,0.2,0.1,0.3\n"
+    )
+    (tmp_path / "rolling_positivity.csv").write_text(csv_text, encoding="utf-8")
+
+    out = ds._pack_trends_positivity(tmp_path / "rolling_positivity.csv")
+
+    nat = out["national"]["national"]
+    assert nat["dates"] == ["2026-05-01", "2026-05-10"]
+    assert len(nat["dates"]) == 2
+    assert nat["mean"] == [0.1, 0.2]
+
+
+def test_positivity_mean_survives_at_full_precision(tmp_path):
+    # A value that would visibly change under any rounding (e.g. round(x, 4)
+    # or round(x, 6)) must come back byte-identical to the source string.
+    csv_text = (
+        "date_of_symptom_onset_imputed,confirmed_case,spatial_scale,province,health_zone,"
+        "daily_positivity_mean,daily_positivity_lower,daily_positivity_upper\n"
+        "2026-05-01,1,national,NA,NA,0.123456789012345,0.01,0.99\n"
+    )
+    (tmp_path / "rolling_positivity.csv").write_text(csv_text, encoding="utf-8")
+
+    out = ds._pack_trends_positivity(tmp_path / "rolling_positivity.csv")
+
+    assert out["national"]["national"]["mean"] == [0.123456789012345]
+
+
+def test_positivity_unparseable_mean_is_skipped_entirely(tmp_path):
+    # A row whose daily_positivity_mean can't be parsed must be dropped from
+    # the series -- not turned into a None entry, and not turned into 0.
+    csv_text = (
+        "date_of_symptom_onset_imputed,confirmed_case,spatial_scale,province,health_zone,"
+        "daily_positivity_mean,daily_positivity_lower,daily_positivity_upper\n"
+        "2026-05-01,1,national,NA,NA,0.4,0.2,0.6\n"
+        "2026-05-02,1,national,NA,NA,NA,0.2,0.6\n"
+        "2026-05-03,1,national,NA,NA,notanumber,0.2,0.6\n"
+        "2026-05-04,1,national,NA,NA,0.5,0.2,0.6\n"
+    )
+    (tmp_path / "rolling_positivity.csv").write_text(csv_text, encoding="utf-8")
+
+    out = ds._pack_trends_positivity(tmp_path / "rolling_positivity.csv")
+
+    nat = out["national"]["national"]
+    assert nat["dates"] == ["2026-05-01", "2026-05-04"]
+    assert nat["mean"] == [0.4, 0.5]
+
+
+def test_positivity_lo_hi_may_be_none_while_mean_present(tmp_path):
+    # lo/hi are allowed to be missing independently of mean. The packer must
+    # not crash, and must preserve None positionally so lo/hi/dates/mean
+    # stay index-aligned.
+    csv_text = (
+        "date_of_symptom_onset_imputed,confirmed_case,spatial_scale,province,health_zone,"
+        "daily_positivity_mean,daily_positivity_lower,daily_positivity_upper\n"
+        "2026-05-01,1,national,NA,NA,0.4,,0.6\n"
+        "2026-05-02,1,national,NA,NA,0.5,0.2,\n"
+    )
+    (tmp_path / "rolling_positivity.csv").write_text(csv_text, encoding="utf-8")
+
+    out = ds._pack_trends_positivity(tmp_path / "rolling_positivity.csv")
+
+    nat = out["national"]["national"]
+    assert nat["dates"] == ["2026-05-01", "2026-05-02"]
+    assert nat["mean"] == [0.4, 0.5]
+    assert nat["lo"] == [None, 0.2]
+    assert nat["hi"] == [0.6, None]
+
+
+def test_positivity_no_epoch_or_leading_trim(tmp_path):
+    # Cases restrict `start` to the first positive date >= 2026-01-01. Deaths
+    # already prove that rule doesn't apply there; positivity must ALSO be
+    # untouched by it -- and it has no `start`/trim concept at all, so a
+    # pre-epoch date must simply be the first entry in `dates`, alongside a
+    # genuine in-epoch date so the cases-packer's fallback-to-earliest-positive
+    # behaviour can't accidentally make this test pass with a wrongly-applied
+    # trim in place.
+    csv_text = (
+        "date_of_symptom_onset_imputed,confirmed_case,spatial_scale,province,health_zone,"
+        "daily_positivity_mean,daily_positivity_lower,daily_positivity_upper\n"
+        "2025-12-31,1,national,NA,NA,0.3,0.1,0.5\n"
+        "2026-01-01,1,national,NA,NA,0.4,0.1,0.5\n"
+    )
+    (tmp_path / "rolling_positivity.csv").write_text(csv_text, encoding="utf-8")
+
+    out = ds._pack_trends_positivity(tmp_path / "rolling_positivity.csv")
+
+    nat = out["national"]["national"]
+    assert nat["dates"] == ["2025-12-31", "2026-01-01"]
+    assert nat["mean"] == [0.3, 0.4]
