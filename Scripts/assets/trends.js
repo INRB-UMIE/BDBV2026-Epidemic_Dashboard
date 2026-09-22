@@ -283,12 +283,20 @@
     if (!body) return;
     var base = tr(titleKey, titleFallback);
     if (titleEl) titleEl.textContent = place ? (base + " - " + place) : base;
-    body.className = "panel-body dc-chart";
+    body.className = "panel-body";
     body.replaceChildren();
-    if (draw(body)) {
+    // The chart gets its own fixed-height box; the caption is its SIBLING, not
+    // a child. Nesting it inside .dc-chart put it inside a 180px-tall box that
+    // already held a 180px svg, so it overflowed and was clipped by the card
+    // below.
+    var chart = document.createElement("div");
+    chart.className = "dc-chart";
+    body.appendChild(chart);
+    if (draw(chart)) {
       addCaption(body, caption(capKey, capFallback, banded(lim)));
       return;
     }
+    body.replaceChildren();
     body.className = "panel-body trends-empty";
     body.innerHTML = "<p>" + (global.trendsEmptyMessage
       ? global.trendsEmptyMessage() : tr("ui.trends_no_plot", "No data available.")) + "</p>";
@@ -320,7 +328,14 @@
     var show = scope === "national" || !!key;
     labCard.style.display = show ? "" : "none";
     if (!show) { labBody.replaceChildren(); return; }
-    if (labTitle) labTitle.textContent = tr("ui.trends_labs_panel", "Laboratory testing");
+    // ui.trends_labs_panel is a TEMPLATE ("Laboratory testing - {location}"),
+    // so it needs engine.js's tf() formatter, not t(). Using t() renders the
+    // placeholder literally.
+    if (labTitle) {
+      labTitle.textContent = global.tf
+        ? global.tf("ui.trends_labs_panel", { location: place })
+        : tr("ui.trends_labs_panel", "Laboratory testing");
+    }
     var labs = labsForSelection(scope, key);
     labBody.replaceChildren();
     if (!labs.length) {
@@ -353,4 +368,15 @@
     _renderPositivity: renderPositivity, _renderLab: renderLab,
     _labsForSelection: labsForSelection, _trends: trends, _xLimits: xLimits
   };
+
+  // engine.js boots synchronously and calls renderTrendsPlots() during that
+  // boot -- which happens BEFORE this file is parsed, since page-scoped scripts
+  // are emitted after engine.js. Its `if (window.TrendsCharts)` guard therefore
+  // finds nothing and silently skips, leaving every card on its empty state.
+  // Trigger one render through engine's own entry point now that we exist, so
+  // it reads the scope/selection state it owns rather than us guessing it.
+  // (genomic.js avoids this by self-booting; engine.js never calls into it.)
+  if (typeof global.renderTrendsPlots === "function") {
+    global.renderTrendsPlots();
+  }
 })(window);
