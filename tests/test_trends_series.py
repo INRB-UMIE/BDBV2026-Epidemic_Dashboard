@@ -60,3 +60,57 @@ def test_blank_counts_are_read_as_zero_not_crashes(tmp_path):
     out = ds._pack_trends_cases(tmp_path / "status_aggregated.csv")
 
     assert out["national"]["national"] == {"start": "2026-05-01", "obs": [1, 0, 0], "imp": [0, 0, 0]}
+
+
+def test_positive_dates_before_the_outbreak_epoch_are_excluded(tmp_path):
+    # earliest_positive_date() restricts the start to positives >= 2026-01-01
+    # when any qualifies, and complete_date_series() then drops every row
+    # before that start -- so a stray 2025 case does not appear at all.
+    csv_text = (
+        "date_of_symptom_onset_imputed,onset_date_was_imputed,confirmed_case,"
+        "spatial_scale,province,health_zone\n"
+        "2025-12-30,FALSE,2,national,NA,NA\n"
+        "2026-05-02,FALSE,3,national,NA,NA\n"
+    )
+    (tmp_path / "status_aggregated.csv").write_text(csv_text, encoding="utf-8")
+
+    out = ds._pack_trends_cases(tmp_path / "status_aggregated.csv")
+
+    # Starts at the in-epoch date, NOT 2025-12-30, and the 2025 count is gone.
+    assert out["national"]["national"] == {"start": "2026-05-02", "obs": [3], "imp": [0]}
+
+
+def test_epoch_falls_back_when_no_positive_date_is_in_the_outbreak_window(tmp_path):
+    # pool <- if (length(outbreak_positives)) outbreak_positives else positive_dates
+    # With everything before the epoch, the fallback keeps the whole series
+    # rather than producing an empty pool.
+    csv_text = (
+        "date_of_symptom_onset_imputed,onset_date_was_imputed,confirmed_case,"
+        "spatial_scale,province,health_zone\n"
+        "2025-12-30,FALSE,2,national,NA,NA\n"
+        "2025-12-31,FALSE,3,national,NA,NA\n"
+    )
+    (tmp_path / "status_aggregated.csv").write_text(csv_text, encoding="utf-8")
+
+    out = ds._pack_trends_cases(tmp_path / "status_aggregated.csv")
+
+    assert out["national"]["national"] == {"start": "2025-12-30", "obs": [2, 3], "imp": [0, 0]}
+
+
+def test_blank_and_na_locations_are_dropped(tmp_path):
+    # _trends_loc() drops province/health_zone values that are empty or the
+    # literal string "NA". Without this, "NA" becomes a location of its own.
+    csv_text = (
+        "date_of_symptom_onset_imputed,onset_date_was_imputed,confirmed_case,"
+        "spatial_scale,province,health_zone\n"
+        "2026-05-02,FALSE,4,province,Ituri,NA\n"
+        "2026-05-02,FALSE,7,province,NA,NA\n"
+        "2026-05-02,FALSE,9,province,,NA\n"
+        "2026-05-02,FALSE,5,healthzone,NA,   \n"
+    )
+    (tmp_path / "status_aggregated.csv").write_text(csv_text, encoding="utf-8")
+
+    out = ds._pack_trends_cases(tmp_path / "status_aggregated.csv")
+
+    assert sorted(out["province"]) == ["Ituri"]   # not "NA", not ""
+    assert out["healthzone"] == {}                # whitespace-only dropped
