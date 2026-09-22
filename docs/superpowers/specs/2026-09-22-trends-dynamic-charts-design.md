@@ -101,7 +101,15 @@ now-removed positivity overlay on the cases chart. Conclusions drawn from the
 stale file were wrong and were discarded.
 
 **Anyone revisiting this spec must re-read the generator at the default branch
-of `BDBV2026-Processing_Code`, not a local checkout.** If that script changes,
+of `BDBV2026-Processing_Code`, not a local checkout.**
+
+**This warning was earned twice.** The colour constants above were first
+transcribed from the stale checkout and were WRONG (`#b23b2e`/`#f1ccc6`, the
+old brick-red palette). The error survived the discovery that the file was
+stale, because only the chart *builders* were re-read from the live generator
+while the Aesthetics block was carried forward unchecked. It was caught later
+by diffing a production SVG's actual fills against the spec. **Verify constants
+against a real output artefact, not only against source.** If that script changes,
 this spec's Section 6 is stale and the charts will drift from the data.
 
 ## 6. Fidelity contract
@@ -113,7 +121,7 @@ block.
 COLOR_INK              #2a2a27      COLOR_POSITIVITY       #5b86b3
 COLOR_MUTED            #9c968b      COLOR_DEATHS           #7c1d1d
 COLOR_INCOMPLETE       #9c968b      COLOR_SAMPLES_ANALYSED #9c968b
-observed onset         #b23b2e      imputed onset          #f1ccc6
+observed onset         #9B7D4E      imputed onset          #C9A266
 POSITIVITY_POINT_R     1.8          line linewidth         0.9
 bar width              0.9          incomplete band alpha  0.25
 ribbon alpha           0.35         DEFAULT_INCOMPLETE_DAYS 7

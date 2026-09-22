@@ -12,8 +12,8 @@
 
   var C = global.DashboardCharts;
 
-  var COLOR_OBS = "#9B7D4E";        // Confirmed (Observed Onset)
-  var COLOR_IMP = "#C9A266";        // Confirmed (Imputed Onset)
+  var COLOR_OBS = "#b23b2e";        // Confirmed (Observed Onset)
+  var COLOR_IMP = "#f1ccc6";        // Confirmed (Imputed Onset)
   var COLOR_POSITIVITY = "#5b86b3";
   var COLOR_DEATHS = "#7c1d1d";
   var COLOR_SAMPLES = "#9c968b";
