@@ -561,3 +561,78 @@ def test_labs_x_is_none_when_no_lab_has_a_usable_mean(tmp_path):
 
     assert labs == []
     assert lab_x is None
+
+
+# --- shared _trends_scale_loc coverage (per-packer canon + unknown scale) ---
+
+def test_deaths_canon_applies_to_health_zones_only_not_provinces(tmp_path):
+    # Same proof as the cases-side test, but for _pack_trends_deaths. A
+    # reviewer previously mutated only the deaths packer's canon line and the
+    # full suite stayed green because nothing exercised it per-packer.
+    csv_text = (
+        "reporting_date,daily_deaths,cumulative_deaths,spatial_scale,province,health_zone\n"
+        "2026-05-02,1,4,province,Ituri,NA\n"
+        "2026-05-02,1,1,healthzone,NA,Bunia\n"
+    )
+    (tmp_path / "cumulative_positive_deaths.csv").write_text(csv_text, encoding="utf-8")
+
+    out = ds._pack_trends_deaths(tmp_path / "cumulative_positive_deaths.csv", canon=lambda s: "REWRITTEN")
+
+    assert sorted(out["province"]) == ["Ituri"]           # untouched by canon
+    assert sorted(out["healthzone"]) == ["REWRITTEN"]     # passed through canon
+
+
+def test_positivity_canon_applies_to_health_zones_only_not_provinces(tmp_path):
+    # Same proof as the cases-side test, but for _pack_trends_positivity.
+    csv_text = (
+        "date_of_symptom_onset_imputed,spatial_scale,province,health_zone,"
+        "daily_positivity_mean,daily_positivity_lower,daily_positivity_upper\n"
+        "2026-05-02,province,Ituri,NA,0.4,0.2,0.6\n"
+        "2026-05-02,healthzone,NA,Bunia,0.5,0.2,0.6\n"
+    )
+    (tmp_path / "rolling_positivity.csv").write_text(csv_text, encoding="utf-8")
+
+    out = ds._pack_trends_positivity(tmp_path / "rolling_positivity.csv", canon=lambda s: "REWRITTEN")
+
+    assert sorted(out["province"]) == ["Ituri"]           # untouched by canon
+    assert sorted(out["healthzone"]) == ["REWRITTEN"]     # passed through canon
+
+
+def test_unrecognised_spatial_scale_is_dropped(tmp_path):
+    # A spatial_scale value outside {national, province, healthzone} (e.g. a
+    # future "district" level) must be silently dropped via the
+    # _UNKNOWN_SCALE sentinel, not raise or land in one of the three buckets.
+    csv_text = (
+        "date_of_symptom_onset_imputed,onset_date_was_imputed,confirmed_case,"
+        "spatial_scale,province,health_zone\n"
+        "2026-05-02,FALSE,4,district,NA,NA\n"
+        "2026-05-02,FALSE,1,national,NA,NA\n"
+    )
+    (tmp_path / "status_aggregated.csv").write_text(csv_text, encoding="utf-8")
+
+    out = ds._pack_trends_cases(tmp_path / "status_aggregated.csv")
+
+    assert out["province"] == {}
+    assert out["healthzone"] == {}
+    assert out["national"]["national"]["obs"] == [1]      # only the recognised row counted
+
+
+def test_deaths_blank_counts_are_read_as_zero_for_non_national_location(tmp_path):
+    # test_deaths_blank_counts_are_read_as_zero only exercises the national
+    # scale; blank/non-numeric counts must read as 0 for a province/
+    # health-zone location too, not just national.
+    csv_text = (
+        "reporting_date,daily_deaths,cumulative_deaths,spatial_scale,province,health_zone\n"
+        "2026-05-01,1,1,healthzone,NA,Bunia\n"
+        "2026-05-02,,,healthzone,NA,Bunia\n"
+        "2026-05-03,notanumber,notanumber,healthzone,NA,Bunia\n"
+    )
+    (tmp_path / "cumulative_positive_deaths.csv").write_text(csv_text, encoding="utf-8")
+
+    out = ds._pack_trends_deaths(tmp_path / "cumulative_positive_deaths.csv")
+
+    assert out["healthzone"]["Bunia"] == {
+        "start": "2026-05-01",
+        "cum": [1, 0, 0],
+        "daily": [1, 0, 0],
+    }

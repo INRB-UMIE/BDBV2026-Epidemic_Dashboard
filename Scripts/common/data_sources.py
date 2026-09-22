@@ -4280,7 +4280,7 @@ def canonicalize_genomic_zones(genomic: dict, known_noms) -> dict:
     return genomic
 
 
-_ONSET_DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+_ISO_DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 # status_aggregated.csv is the SAME table the Trends tab's "Daily Cases by
 # Symptom Onset" SVG is rendered from (manifest.json's ``source_csv``). The
 # genomic panel reads its confirmed_case column so both charts show identical
@@ -4317,6 +4317,31 @@ def _trends_loc(row, key_field):
     return name
 
 
+def _trends_scale_loc(row, canon):
+    """(scale, location) for a row, or None when the row should be skipped.
+
+    The part of every spatial packer's row loop that must stay IDENTICAL across
+    cases/deaths/positivity. What follows it in each packer -- accumulate vs
+    overwrite, the zero-total skip, the epoch trim -- deliberately differs and
+    is NOT shared. See the spec's section 6.
+    """
+    scale = (row.get("spatial_scale") or "").strip().lower()
+    key_field = _TRENDS_SCALE_MAP.get(scale, _UNKNOWN_SCALE)
+    if key_field is _UNKNOWN_SCALE:
+        return None
+    loc = _trends_loc(row, key_field)
+    if loc is None:
+        return None
+    if key_field == "health_zone":
+        # canon maps to canonical health-zone noms, so it applies to
+        # zones ONLY. Province names are a different namespace; several
+        # DRC provinces share a name with a health zone (Ituri, Tshopo,
+        # Kinshasa...), so running provinces through it would silently
+        # rewrite a province to a zone's spelling if the two ever drift.
+        loc = canon(loc)
+    return scale, loc
+
+
 def _i0(value):
     """Integer count, with blank/NA/non-numeric read as 0.
 
@@ -4340,22 +4365,12 @@ def _pack_trends_cases(path, canon=None):
     buckets = {scale: {} for scale, _ in _TRENDS_SCALES}
     with open(path, newline="", encoding="utf-8") as fh:
         for row in csv.DictReader(fh):
-            scale = (row.get("spatial_scale") or "").strip().lower()
-            key_field = _TRENDS_SCALE_MAP.get(scale, _UNKNOWN_SCALE)
-            if key_field is _UNKNOWN_SCALE:
+            resolved = _trends_scale_loc(row, canon)
+            if resolved is None:
                 continue
-            loc = _trends_loc(row, key_field)
-            if loc is None:
-                continue
-            if key_field == "health_zone":
-                # canon maps to canonical health-zone noms, so it applies to
-                # zones ONLY. Province names are a different namespace; several
-                # DRC provinces share a name with a health zone (Ituri, Tshopo,
-                # Kinshasa...), so running provinces through it would silently
-                # rewrite a province to a zone's spelling if the two ever drift.
-                loc = canon(loc)
+            scale, loc = resolved
             day = (row.get("date_of_symptom_onset_imputed") or "").strip()
-            if not _ONSET_DATE_RE.match(day):
+            if not _ISO_DATE_RE.match(day):
                 continue
             slot = "imp" if (row.get("onset_date_was_imputed") or "").strip().upper() == "TRUE" else "obs"
             entry = buckets[scale].setdefault(loc, {}).setdefault(day, {"obs": 0, "imp": 0})
@@ -4389,22 +4404,12 @@ def _pack_trends_deaths(path, canon=None):
     buckets = {scale: {} for scale, _ in _TRENDS_SCALES}
     with open(path, newline="", encoding="utf-8") as fh:
         for row in csv.DictReader(fh):
-            scale = (row.get("spatial_scale") or "").strip().lower()
-            key_field = _TRENDS_SCALE_MAP.get(scale, _UNKNOWN_SCALE)
-            if key_field is _UNKNOWN_SCALE:
+            resolved = _trends_scale_loc(row, canon)
+            if resolved is None:
                 continue
-            loc = _trends_loc(row, key_field)
-            if loc is None:
-                continue
-            if key_field == "health_zone":
-                # canon maps to canonical health-zone noms, so it applies to
-                # zones ONLY. Province names are a different namespace; several
-                # DRC provinces share a name with a health zone (Ituri, Tshopo,
-                # Kinshasa...), so running provinces through it would silently
-                # rewrite a province to a zone's spelling if the two ever drift.
-                loc = canon(loc)
+            scale, loc = resolved
             day = (row.get("reporting_date") or "").strip()
-            if not _ONSET_DATE_RE.match(day):
+            if not _ISO_DATE_RE.match(day):
                 continue
             # OVERWRITE, last row wins -- deliberately unlike _pack_trends_cases
             buckets[scale].setdefault(loc, {})[day] = (
@@ -4424,6 +4429,11 @@ def _pack_trends_deaths(path, canon=None):
                     last = by_day[d][1]
                 else:
                     daily.append(0)
+                # `last` is cumulative_deaths read verbatim per row (matching
+                # R's complete_cumulative_series(), which does
+                # `last_cum <- rows$cumulative_deaths[idx[i]]` rather than
+                # summing daily_deaths), so a downward data correction shows
+                # as a legitimate dip here, not a bug.
                 cum.append(last)               # carry forward
             packed[scale][loc] = {"start": days[0], "cum": cum, "daily": daily}
     return packed
@@ -4443,22 +4453,12 @@ def _pack_trends_positivity(path, canon=None):
     buckets = {scale: {} for scale, _ in _TRENDS_SCALES}
     with open(path, newline="", encoding="utf-8") as fh:
         for row in csv.DictReader(fh):
-            scale = (row.get("spatial_scale") or "").strip().lower()
-            key_field = _TRENDS_SCALE_MAP.get(scale, _UNKNOWN_SCALE)
-            if key_field is _UNKNOWN_SCALE:
+            resolved = _trends_scale_loc(row, canon)
+            if resolved is None:
                 continue
-            loc = _trends_loc(row, key_field)
-            if loc is None:
-                continue
-            if key_field == "health_zone":
-                # canon maps to canonical health-zone noms, so it applies to
-                # zones ONLY. Province names are a different namespace; several
-                # DRC provinces share a name with a health zone (Ituri, Tshopo,
-                # Kinshasa...), so running provinces through it would silently
-                # rewrite a province to a zone's spelling if the two ever drift.
-                loc = canon(loc)
+            scale, loc = resolved
             day = (row.get("date_of_symptom_onset_imputed") or "").strip()
-            if not _ONSET_DATE_RE.match(day):
+            if not _ISO_DATE_RE.match(day):
                 continue
             trio = (
                 _parse_optional_float(row.get("daily_positivity_mean")),
@@ -4495,7 +4495,7 @@ def _pack_trends_labs(path):
         for row in csv.DictReader(fh):
             code = (row.get("lab_name") or "").strip()
             day = (row.get("lab_analysis_date") or "").strip()
-            if not code or not _ONSET_DATE_RE.match(day):
+            if not code or not _ISO_DATE_RE.match(day):
                 continue
             mean = _parse_optional_float(row.get("daily_positivity_mean"))
             if mean is None:
@@ -4510,7 +4510,7 @@ def _pack_trends_labs(path):
                 "label": long_name or code,
                 "health_zone": hz if hz and hz.upper() != "NA" else None,
                 "province": prov if prov and prov.upper() != "NA" else None,
-                "earliest": earliest if _ONSET_DATE_RE.match(earliest) else None,
+                "earliest": earliest if _ISO_DATE_RE.match(earliest) else None,
                 "rows": {},
             })
             lab["rows"][day] = (
@@ -4583,7 +4583,7 @@ def _latest_status_aggregated(outputs_dir):
         return preferred / _STATUS_AGG_CSV_NAME
     dated = sorted(
         (p for p in base.iterdir()
-         if p.is_dir() and _ONSET_DATE_RE.match(p.name) and (p / _STATUS_AGG_CSV_NAME).exists()),
+         if p.is_dir() and _ISO_DATE_RE.match(p.name) and (p / _STATUS_AGG_CSV_NAME).exists()),
         key=lambda p: p.name,
     )
     return (dated[-1] / _STATUS_AGG_CSV_NAME) if dated else None
