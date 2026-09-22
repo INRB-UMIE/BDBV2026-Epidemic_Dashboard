@@ -4290,6 +4290,74 @@ _ONSET_DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 _STATUS_AGG_CSV_NAME = "status_aggregated.csv"
 
 
+# --- Trends series packers -------------------------------------------------
+# These reproduce BDBV2026-Processing_Code@main's 4-make-dashboard-plots.R
+# exactly; see docs/superpowers/specs/2026-09-22-trends-dynamic-charts-design.md
+# section 6. Do not "tidy" the asymmetries below -- cases ACCUMULATE duplicate
+# rows while deaths/positivity OVERWRITE (last row wins), and only cases skip
+# zero-total locations. That is what the generator does.
+
+_TRENDS_SCALES = (("national", None), ("province", "province"), ("healthzone", "health_zone"))
+_TRENDS_EPOCH = "2026-01-01"
+
+
+def _trends_loc(row, key_field):
+    """Location name for a row, or None when it should be dropped."""
+    if key_field is None:
+        return "national"
+    name = (row.get(key_field) or "").strip()
+    if not name or name.upper() == "NA":
+        return None
+    return name
+
+
+def _day_range(start, end):
+    """Inclusive list of ISO dates from start to end."""
+    s = date.fromisoformat(start)
+    e = date.fromisoformat(end)
+    return [(s + timedelta(days=i)).isoformat() for i in range((e - s).days + 1)]
+
+
+def _pack_trends_cases(path, canon=None):
+    """{scale: {location: {start, obs[], imp[]}}} from status_aggregated.csv."""
+    canon = canon or (lambda s: s)
+    buckets = {scale: {} for scale, _ in _TRENDS_SCALES}
+    with open(path, newline="", encoding="utf-8") as fh:
+        for row in csv.DictReader(fh):
+            scale = (row.get("spatial_scale") or "").strip().lower()
+            key_field = dict(_TRENDS_SCALES).get(scale, "__missing__")
+            if key_field == "__missing__":
+                continue
+            loc = _trends_loc(row, key_field)
+            if loc is None:
+                continue
+            if key_field is not None:
+                loc = canon(loc)
+            day = (row.get("date_of_symptom_onset_imputed") or "").strip()
+            if not _ONSET_DATE_RE.match(day):
+                continue
+            slot = "imp" if (row.get("onset_date_was_imputed") or "").strip().upper() == "TRUE" else "obs"
+            entry = buckets[scale].setdefault(loc, {}).setdefault(day, {"obs": 0, "imp": 0})
+            entry[slot] += _i(row.get("confirmed_case"))   # ACCUMULATE
+
+    packed = {scale: {} for scale, _ in _TRENDS_SCALES}
+    for scale, by_loc in buckets.items():
+        for loc, by_day in by_loc.items():
+            if sum(v["obs"] + v["imp"] for v in by_day.values()) <= 0:
+                continue                                    # spec 6.1 skip rule
+            positives = [d for d, v in by_day.items() if v["obs"] + v["imp"] > 0]
+            in_epoch = [d for d in positives if d >= _TRENDS_EPOCH]
+            start = min(in_epoch or positives)
+            end = max(by_day)                               # trailing zeros KEPT
+            days = _day_range(start, end)
+            packed[scale][loc] = {
+                "start": start,
+                "obs": [by_day.get(d, {}).get("obs", 0) for d in days],
+                "imp": [by_day.get(d, {}).get("imp", 0) for d in days],
+            }
+    return packed
+
+
 def _onset_manifest_dated_dir(base: Path):
     """The dated ``outputs/<date>/`` dir the onset SVGs are read from.
 
