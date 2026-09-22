@@ -123,7 +123,6 @@ __all__ = [
     '_parse_ic_model_scalar',
     'load_ic_model_estimates',
     '_slugify_plot_key',
-    '_lab_label_from_stem',
     'load_trends_series',
     '_parse_optional_float',
     '_parse_optional_int',
@@ -1272,35 +1271,6 @@ def _slugify_plot_key(text: str) -> str:
     text = text.lower()
     text = re.sub(r"[^a-z0-9]+", "-", text)
     return text.strip("-")
-
-
-def _lab_label_from_stem(stem: str, name_map: dict[str, str]) -> str:
-    raw = stem[4:] if stem.lower().startswith("lab_") else stem
-    slug = _slugify_plot_key(raw)
-    if slug in name_map:
-        return name_map[slug]
-    compact = slug.replace("-", "")
-    if compact in name_map:
-        return name_map[compact]
-    upper = raw.upper().replace("_", "-")
-    if upper in name_map:
-        return name_map[upper]
-    # Fall back to the plot-name token (e.g. inrbk → INRBK).
-    return re.sub(r"[-_]+", "-", raw).upper()
-
-
-def _lab_code_from_stem(stem: str, manifest_labs: dict) -> str | None:
-    """Match a lab_*.svg stem back to the manifest lab_code (e.g. lab_lpspbn → LPSPBN)."""
-    raw = stem[4:] if stem.lower().startswith("lab_") else stem
-    for suffix in ("_samples", "_positivity"):
-        if raw.endswith(suffix):
-            raw = raw[: -len(suffix)]
-            break
-    slug = _slugify_plot_key(raw)
-    for code in manifest_labs:
-        if _slugify_plot_key(code) == slug:
-            return code
-    return None
 
 
 def _parse_optional_float(value) -> float | None:
