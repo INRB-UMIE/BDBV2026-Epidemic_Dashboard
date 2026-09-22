@@ -110,8 +110,40 @@
     return true;
   }
 
+  // --- Card 2: cumulative deaths --------------------------------------------
+  function renderDeaths(host, scope, key) {
+    var d = trends(), entry = pick("deaths", scope, key), lim = xLimits(scope, key);
+    if (!entry || !lim) return false;
+    var dates = isoSeq(entry.start, entry.cum.length);
+    var dim = size(host), svg = newSvg(host, dim.W, dim.H);
+    var yMax = Math.max.apply(null, entry.cum.concat([0]));
+
+    var fr = C.frame(svg, {
+      width: dim.W, height: dim.H, pad: PAD,
+      xStart: lim.start, xEnd: lim.end, yMax: yMax
+    });
+    C.shadeRegion(svg, fr, d.incomplete_from, COLOR_INCOMPLETE);
+    C.line(svg, fr, dates, entry.cum, COLOR_DEATHS, 1.6);
+    // Points ONLY on days with a death reported -- a point every day would
+    // imply an event on days where none occurred.
+    C.points(svg, fr, dates, entry.cum, COLOR_DEATHS, 2, function (i) {
+      return entry.daily[i] > 0;
+    });
+    host.appendChild(svg);
+
+    C.tooltip(host, svg, fr, function (iso) {
+      var i = dates.indexOf(iso);
+      if (i < 0) return null;
+      return '<div class="dc-tip-d">' + C.fmtDay(C.dayMs(iso)) + "</div>" +
+        "<div>" + tr("ui.trends_axis_deaths", "Cumulative Deaths") + ": " + entry.cum[i] + "</div>" +
+        (entry.daily[i] > 0 ? '<div class="dc-tip-ci">+' + entry.daily[i] + "</div>" : "");
+    });
+    return true;
+  }
+
   global.TrendsCharts = {
     _renderCases: renderCases,
+    _renderDeaths: renderDeaths,
     _trends: trends,
     _xLimits: xLimits,
     _pick: pick,
