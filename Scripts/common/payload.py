@@ -114,10 +114,12 @@ def build_shared_payload() -> dict:
         for feat in (province_boundaries.get("features") or [])
         if (feat.get("properties") or {}).get("province")
     })
-    onset_trends = load_dashboard_plots(
-        zone_noms=zone_noms,
-        provinces=province_names,
-    )
+    trends = load_trends_series(known_noms=set(zone_data))
+    if trends:
+        print(f"  trends: asof {trends['asof']}, "
+              f"{len(trends['cases']['health_zones'])} zones, "
+              f"{len(trends['labs'])} labs, "
+              f"incomplete from {trends['incomplete_from']}")
     _eff_active = {n for n, r in zone_data.items()
                    if int(r.get("effective_confirmed_cases") or 0) > 0}
     invasion_risk = load_invasion_risk_estimates(effective_active_noms=_eff_active)
@@ -213,7 +215,7 @@ def build_shared_payload() -> dict:
         "genome_sequence_markers": genome_sequence_markers,
         "genome_markers_available": bool(genome_sequence_markers),
         "province_boundaries": province_boundaries,
-        "onset_trends": onset_trends,
+        "trends": trends,
         "invasion_risk": invasion_risk,
         "import_force_pairwise": import_force_pairwise,
         "phr_context": phr_context_by_lang.get("en", {"national": [], "by_nom": {}}),
