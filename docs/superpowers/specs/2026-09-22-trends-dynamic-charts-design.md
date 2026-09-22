@@ -114,17 +114,51 @@ this spec's Section 6 is stale and the charts will drift from the data.
 
 ## 6. Fidelity contract
 
-Exact behaviour to reproduce. Constants are from the generator's Aesthetics
-block.
+**Scope of this contract, as of the 2026-09-22 review:**
+
+- **Binding — the data and the information.** What is plotted, from which
+  rows, for which locations, with what meaning. Everything in §6.1–§6.7 below
+  that concerns values, selection, ordering, gaps, ranges and label *text* is a
+  contract with the source and must not change.
+- **Not binding — the visual style.** Colours, padding, tick density, fonts,
+  bar widths, point radii, line weights and tooltip styling follow the
+  **Genomic Epidemiology tab** (`Scripts/assets/genomic.js`), not the R SVGs.
+  The goal is one visual language across the dashboard, not a pixel reproduction
+  of ggplot output.
+
+This split was set by the project owner: *"when I said we want things to be
+right, by that I mean the data and information presented, not the visualisation
+style."*
+
+### Palette (presentation — follows genomic.js)
 
 ```
-COLOR_INK              #2a2a27      COLOR_POSITIVITY       #5b86b3
-COLOR_MUTED            #9c968b      COLOR_DEATHS           #7c1d1d
-COLOR_INCOMPLETE       #9c968b      COLOR_SAMPLES_ANALYSED #9c968b
-observed onset         #9B7D4E      imputed onset          #C9A266
-POSITIVITY_POINT_R     1.8          line linewidth         0.9
-bar width              0.9          incomplete band alpha  0.25
-ribbon alpha           0.35         DEFAULT_INCOMPLETE_DAYS 7
+cases: observed       #9e2b2b    (genomic DIST_OBS -- the genomic tab's
+cases: imputed        #587e72     "Confirmed positive cases" panel plots the
+                                  SAME quantity; the two must agree)
+deaths line+points    #7c1d1d    (genomic Ne "Exp" series)
+positivity line       #587e72    (genomic SkyGrid idiom)
+positivity CI band    rgba(88,126,114,0.15)
+lab sample bars       #9c968b    (shared muted)
+incomplete band       #9c968b at 0.25 opacity
+axis text / labels    #9c968b        gridlines  #eee
+axis line             #c9c7c2        base font  9px
+```
+
+Chart chrome (gridlines, axis lines, label colour and size) is already
+genomic-derived via `Scripts/assets/charts.js`.
+
+**Bars are clipped to the plot gutter** with a `clipPath`, exactly as
+genomic.js's distribution panel does — that is what handles a centred bar at
+the axis boundary. Do NOT reproduce ggplot's ~5% `coord_cartesian(expand=TRUE)`
+axis padding; genomic clips instead, and consistency with genomic is the rule.
+
+### Values that ARE binding
+
+```
+incomplete window     from manifest incomplete_styling.days (production: 5, NOT 7)
+positivity scale      proportions stored; x100 only at render
+lab secondary axis    0-100 (see O1)
 ```
 
 ### 6.1 Which locations get a chart
@@ -185,7 +219,7 @@ dashboard does not show. Build it from the cases family alone.
 - Gaps filled by `complete_cumulative_series()`: `daily_deaths` → 0,
   `cumulative_deaths` → **carried forward from the last observed value**
   (a step, not an interpolation).
-- Line in `COLOR_DEATHS`, linewidth 0.9.
+- Line in the deaths colour (see palette); weight follows genomic.
 - Points drawn **only on days where `daily_deaths > 0`**, size 1.8.
 - y-axis name `Cumulative Deaths`.
 - Caption: `Cumulative confirmed deaths by reporting date (death alerts with
@@ -200,8 +234,8 @@ dashboard does not show. Build it from the cases family alone.
   connects straight across gaps; the JS line must do the same, **not** insert
   zeros or break the path.
 - Values clamped to `[0, 1]` then **multiplied by 100** (percent).
-- Ribbon `lower_pct`→`upper_pct` in `COLOR_POSITIVITY` at alpha 0.35;
-  line linewidth 0.9; points size 1.8; same colour.
+- CI band `lower_pct`→`upper_pct`, then line, then points, in the positivity
+  colour (see palette). Weights and radii follow genomic.
 - y-axis name `Sample Positivity (%)`, **lower limit pinned to 0**, upper free.
 - Caption: `5-day rolling test positivity by date of symptom onset`
   (+ incomplete note when banded).
@@ -213,7 +247,7 @@ dashboard does not show. Build it from the cases family alone.
 - **All lab charts share one x range:** `[min(earliest_analysed_sample) across
   ALL labs, max(lab_analysis_date) across ALL labs]`, so labs stay visually
   comparable. Not per-lab.
-- Bars: `total_samples_analysed_daily`, fill `COLOR_SAMPLES_ANALYSED`, width 0.9.
+- Bars: `total_samples_analysed_daily`, in the lab-bars colour (see palette).
 - `max_total = max(1, max(total_samples_analysed_daily))` **for that lab**.
 - Positivity clamped to `[0, 1]` then scaled by `* max_total`; ribbon/line/points
   as in §6.4.
@@ -232,7 +266,8 @@ dashboard does not show. Build it from the cases family alone.
 
   This is the one intentional departure from current appearance in this change,
   and it exists to stop a positivity of 0.67 being readable as "0.67%".
-- Dashed vertical line at that lab's `earliest_analysed_sample`, `COLOR_INK`.
+- Dashed vertical marker at that lab's `earliest_analysed_sample` (the marker's
+  presence and date are binding; its styling follows genomic).
 - Text annotation `Earliest Sample: YYYY-MM-DD` at `y = max_total * 1.02`,
   `hjust = -0.05`, size 3.2, `COLOR_INK`.
 - Caption: `Samples analysed and test positivity by analysis date` (constant —

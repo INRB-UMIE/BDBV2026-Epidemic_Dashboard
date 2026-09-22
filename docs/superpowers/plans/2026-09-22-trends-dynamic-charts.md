@@ -8,7 +8,12 @@
 
 **Tech Stack:** Python 3.9+ stdlib (`csv`, `json`, `datetime`), pytest, vanilla ES5-style JS (no framework, no charting library), SVG via `document.createElementNS`.
 
-**Spec:** `docs/superpowers/specs/2026-09-22-trends-dynamic-charts-design.md` — read §6 (fidelity contract) before starting. Section numbers below refer to it.
+**Spec:** `docs/superpowers/specs/2026-09-22-trends-dynamic-charts-design.md` — read §6 before starting. Section numbers below refer to it.
+
+> **Scope note (2026-09-22):** the **data and information** are binding; the
+> **visual style is not**. Colours, padding, fonts, weights and tooltip styling
+> follow the Genomic Epidemiology tab (`Scripts/assets/genomic.js`), not the R
+> SVGs. Do not try to pixel-match ggplot output.
 
 ---
 
@@ -1194,7 +1199,7 @@ git commit -m "Add shared runtime-SVG chart primitives"
 
 ### Task 8: `trends.js` — module shell and the confirmed-cases card
 
-**Fidelity (§6.2):** stacked bars, **observed at the bottom** (`#9B7D4E`), imputed on top (`#C9A266`); y-axis `Cases`; no positivity overlay.
+**Binding (§6.2):** stacked bars, **observed at the bottom**, imputed on top; y-axis `Cases`; no positivity overlay. Colours follow the genomic palette (§6 of the spec) — style is not binding, the stacking order and meaning are.
 
 **Files:**
 - Create: `Scripts/assets/trends.js`
@@ -1219,10 +1224,11 @@ Create `Scripts/assets/trends.js`:
 
   var C = global.DashboardCharts;
 
-  var COLOR_OBS = "#9B7D4E";        // Confirmed (Observed Onset)
-  var COLOR_IMP = "#C9A266";        // Confirmed (Imputed Onset)
-  var COLOR_POSITIVITY = "#5b86b3";
-  var COLOR_DEATHS = "#7c1d1d";
+  var COLOR_OBS = "#9e2b2b";        // genomic DIST_OBS -- same quantity as the
+  var COLOR_IMP = "#587e72";        // genomic tab's "Confirmed positive cases"
+  var COLOR_POSITIVITY = "#587e72"; // genomic SkyGrid idiom
+  var COLOR_POSITIVITY_BAND = "rgba(88,126,114,0.15)";
+  var COLOR_DEATHS = "#7c1d1d";     // genomic Ne "Exp" series
   var COLOR_SAMPLES = "#9c968b";
   var COLOR_INCOMPLETE = "#9c968b";
   var COLOR_INK = "#2a2a27";
@@ -1347,7 +1353,7 @@ git commit -m "Render the confirmed-cases card from data"
 
 ### Task 9: Cumulative deaths card
 
-**Fidelity (§6.3):** line in `#7c1d1d`; points **only** where `daily > 0`; y-axis `Cumulative Deaths`.
+**Binding (§6.3):** points **only** where `daily > 0`; forward-filled step; y-axis `Cumulative Deaths`. Colour/weight follow genomic.
 
 **Files:**
 - Modify: `Scripts/assets/trends.js`
@@ -1416,7 +1422,7 @@ git commit -m "Render the cumulative-deaths card from data"
 
 ### Task 10: Rolling positivity card
 
-**Fidelity (§6.4):** sparse dates, line straight across gaps (**never** zero-filled); values clamped to [0,1] then ×100; y-axis `Sample Positivity (%)` pinned at 0.
+**Binding (§6.4):** sparse dates, line straight across gaps (**never** zero-filled); values clamped to [0,1] then ×100; y-axis `Sample Positivity (%)` pinned at 0. Colours follow genomic.
 
 **Files:**
 - Modify: `Scripts/assets/trends.js`
@@ -1486,7 +1492,7 @@ git commit -m "Render the rolling-positivity card from data"
 
 ### Task 11: Laboratory testing card
 
-**Fidelity (§6.5):** every lab shares the **global** x range (`trends.lab_x`); bars are samples analysed; positivity is scaled by that lab's `max_total`; dashed marker at `earliest`. **D6:** the secondary axis is relabelled **0–100** — this is a label change only, the marks do not move.
+**Binding (§6.5):** every lab shares the **global** x range (`trends.lab_x`); bars are samples analysed; positivity scaled by that lab's `max_total`; dashed marker at `earliest`. Colours follow genomic. **D6:** the secondary axis is relabelled **0–100** — this is a label change only, the marks do not move.
 
 **Files:**
 - Modify: `Scripts/assets/trends.js`
