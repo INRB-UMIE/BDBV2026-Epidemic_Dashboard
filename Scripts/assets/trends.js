@@ -247,15 +247,104 @@
     return true;
   }
 
+  // Caption text, with the incomplete-reporting sentence appended ONLY when a
+  // band is actually drawn -- the two vary together in the source.
+  function caption(key, fallback, banded) {
+    var text = tr(key, fallback);
+    if (!banded) return text;
+    return text + ". " + tr("ui.trends_caption_incomplete",
+      "Shaded region: dates within the last week (reporting likely incomplete).");
+  }
+
+  // True when the incomplete band falls inside this card's x range. When it
+  // does not, no band is drawn and the caption loses its trailing sentence.
+  function banded(lim) {
+    var d = trends();
+    return !!(d && d.incomplete_from && lim && d.incomplete_from <= lim.end);
+  }
+
+  function addCaption(body, text) {
+    var p = document.createElement("p");
+    p.className = "dc-caption";
+    p.textContent = text;
+    body.appendChild(p);
+  }
+
+  // Fills one card: title, then either a chart plus its caption, or the
+  // existing empty-state copy (owned by engine.js, which knows the selection).
+  function card(titleId, bodyId, titleKey, titleFallback, place, draw, capKey, capFallback, lim) {
+    var titleEl = document.getElementById(titleId), body = document.getElementById(bodyId);
+    if (!body) return;
+    var base = tr(titleKey, titleFallback);
+    if (titleEl) titleEl.textContent = place ? (base + " - " + place) : base;
+    body.className = "panel-body dc-chart";
+    body.replaceChildren();
+    if (draw(body)) {
+      addCaption(body, caption(capKey, capFallback, banded(lim)));
+      return;
+    }
+    body.className = "panel-body trends-empty";
+    body.innerHTML = "<p>" + (global.trendsEmptyMessage
+      ? global.trendsEmptyMessage() : tr("ui.trends_no_plot", "No data available.")) + "</p>";
+  }
+
+  function render(state) {
+    if (!trends()) return;
+    var scope = state.scope, key = state.key;
+    var place = scope === "national"
+      ? tr("ui.trends_scope_national", "National")
+      : (scope === "health_zone" && global.zoneDisplayName ? (global.zoneDisplayName(key) || key) : key);
+    var lim = xLimits(scope, key);
+
+    card("trends-title", "trends-body", "ui.trends_panel", "Daily Cases by Symptom Onset",
+      place, function (b) { return renderCases(b, scope, key); },
+      "ui.trends_caption_cases", "Confirmed cases by date of symptom onset", lim);
+    card("trends-deaths-title", "trends-deaths-body", "ui.trends_deaths_panel", "Cumulative Deaths",
+      place, function (b) { return renderDeaths(b, scope, key); },
+      "ui.trends_caption_deaths",
+      "Cumulative confirmed deaths by reporting date (death alerts with confirmed MVE classification)", lim);
+    card("trends-positivity-title", "trends-positivity-body", "ui.trends_positivity_panel", "Test Positivity",
+      place, function (b) { return renderPositivity(b, scope, key); },
+      "ui.trends_caption_positivity", "5-day rolling test positivity by date of symptom onset", lim);
+
+    var labCard = document.getElementById("trends-labs");
+    var labBody = document.getElementById("trends-labs-body");
+    var labTitle = document.getElementById("trends-labs-title");
+    if (!labCard || !labBody) return;
+    var show = scope === "national" || !!key;
+    labCard.style.display = show ? "" : "none";
+    if (!show) { labBody.replaceChildren(); return; }
+    if (labTitle) labTitle.textContent = tr("ui.trends_labs_panel", "Laboratory testing");
+    var labs = labsForSelection(scope, key);
+    labBody.replaceChildren();
+    if (!labs.length) {
+      labBody.className = "panel-body trends-empty";
+      labBody.innerHTML = "<p>" + tr("ui.trends_no_labs", "No laboratory data for this selection.") + "</p>";
+      return;
+    }
+    labBody.className = "panel-body trends-labs-body";
+    labs.forEach(function (lab) {
+      var wrap = document.createElement("div");
+      wrap.className = "trends-lab-subplot";
+      var h = document.createElement("h4");
+      h.className = "trends-lab-subplot-title";
+      h.textContent = lab.label || lab.code;
+      wrap.appendChild(h);
+      var body = document.createElement("div");
+      body.className = "dc-chart";
+      wrap.appendChild(body);
+      labBody.appendChild(wrap);
+      renderLab(body, lab);
+    });
+    // Lab caption is constant -- it has no incomplete-note variant.
+    addCaption(labBody, tr("ui.trends_caption_labs",
+      "Samples analysed and test positivity by analysis date"));
+  }
+
   global.TrendsCharts = {
-    _renderCases: renderCases,
-    _renderDeaths: renderDeaths,
-    _renderPositivity: renderPositivity,
-    _renderLab: renderLab,
-    _labsForSelection: labsForSelection,
-    _trends: trends,
-    _xLimits: xLimits,
-    _pick: pick,
-    _isoSeq: isoSeq
+    render: render,
+    _renderCases: renderCases, _renderDeaths: renderDeaths,
+    _renderPositivity: renderPositivity, _renderLab: renderLab,
+    _labsForSelection: labsForSelection, _trends: trends, _xLimits: xLimits
   };
 })(window);
