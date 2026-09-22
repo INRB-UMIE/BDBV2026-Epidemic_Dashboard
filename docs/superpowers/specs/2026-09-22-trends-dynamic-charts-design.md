@@ -543,8 +543,46 @@ rather than deciding, since it is user-visible wording.
 
 ## 11. Follow-ups (explicitly out of scope)
 
+### Downstream, in this repo
+
 1. Migrate `genomic.js` onto `charts.js` and delete its duplicated primitives (D4).
-2. Publish an allowlisted public aggregate feed and read that instead (D1).
-3. Ask the R pipeline to stop emitting the now-unused SVG families.
-4. Ask the R pipeline to record the incomplete-reporting cutoff in `manifest.json` (**confirmed follow-up**, D7/O2).
-5. Report the lab secondary-axis mislabel upstream so the SVGs match the dashboard (**confirmed follow-up**, D6/O1).
+   The two tabs now share a palette but not the code that draws it.
+2. Publish an allowlisted public aggregate feed and read that instead of the
+   private repo (D1).
+3. `Scripts/build_dashboard_public.py` still carries its own copy of the
+   `onset_trends` SVG path. It is marked superseded and nothing calls it, but
+   it now describes a pipeline that no longer exists. Delete it or update it.
+
+### Upstream, for BDBV2026-Processing_Code / the pipeline owners
+
+Each of these was found while transcribing `4-make-dashboard-plots.R`. None
+blocks this work; all are worth raising.
+
+4. **Record the incomplete-reporting cutoff in `manifest.json`** (D7/O2).
+   `incomplete_reporting_dates()` derives the shaded window from `Sys.Date()` at
+   pipeline-run time, and that date is written nowhere. The dashboard currently
+   approximates it as `snapshot_date - incomplete_days`, which is exact only
+   when the pipeline runs on the snapshot date. One extra manifest field
+   (`incomplete_styling.cutoff`) would retire the approximation permanently.
+
+5. **The lab charts' secondary axis is mislabelled** (D6/O1). `sec_axis(~ . /
+   max_total)` produces a 0-1 proportion under a `Sample Positivity (%)` label,
+   so a positivity of 0.67 reads as "0.67%". The dashboard now renders 0-100;
+   the SVGs still do not, so the two disagree until the generator is fixed.
+
+6. **The incomplete-reporting caption is hardcoded to "the last week" while the
+   window is configurable.** `INCOMPLETE_CAPTION_NOTE` says "dates within the
+   last week", but the window comes from `nowcasting.test_days`, which is
+   **5** in production, not 7. The caption and the shading have been able to
+   disagree for as long as the value has been 5. The dashboard reproduces the
+   caption verbatim, so it inherits the same mismatch.
+
+7. **A pre-2026 confirmed case is silently dropped from the cases chart.**
+   `earliest_positive_date()` restricts the series start to positives
+   `>= 2026-01-01` when any qualifies, and `complete_date_series()` then filters
+   out every row before that start. A stray 2025-dated onset would therefore not
+   appear at all, rather than being shown or flagged. Faithfully reproduced
+   here; worth confirming it is intended.
+
+8. Ask the pipeline to stop emitting the SVG families the dashboard no longer
+   reads, once (5) is resolved and nothing else consumes them.
