@@ -37,8 +37,14 @@
   var _cache;
   function trends() { if (_cache === undefined) _cache = readTrends(); return _cache; }
 
+  // engine.js's t() ECHOES THE KEY when a string is missing rather than
+  // returning null, so a plain `|| fallback` can never fire -- a mistyped or
+  // absent key would render as the literal text "ui.trends_axis_positivity" in
+  // the UI. Treat "came back unchanged" as a miss.
   function tr(key, fallback) {
-    return (global.t ? global.t(key) : null) || fallback;
+    if (!global.t) return fallback;
+    var v = global.t(key);
+    return (v && v !== key) ? v : fallback;
   }
 
   // Resolve one family's entry for the current selection.

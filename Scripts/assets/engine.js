@@ -2858,15 +2858,6 @@ function trendsEntityList() {
   return [{id: "national", label: t("ui.trends_scope_national"), kind: "national"}];
 }
 
-function trendsSelectionLabel() {
-  if (trendsScope === "national") return t("ui.trends_scope_national");
-  if (!trendsSelectedKey) return "";
-  if (trendsScope === "health_zone") {
-    return zoneDisplayName(trendsSelectedKey) || trendsSelectedKey;
-  }
-  return trendsSelectedKey;
-}
-
 // Renders every card in the plots column. All four cards are drawn by
 // trends.js (page-scoped to trends.html) from PAYLOAD.trends; engine.js
 // still owns the scope/selection state and the map.
