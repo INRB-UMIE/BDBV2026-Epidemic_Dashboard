@@ -217,3 +217,46 @@ def test_deaths_blank_counts_are_read_as_zero(tmp_path):
         "cum": [1, 0, 0],
         "daily": [1, 0, 0],
     }
+
+
+# --- canon scoping (health zones only) --------------------------------------
+
+def test_canon_applies_to_health_zones_only_not_provinces(tmp_path):
+    # canon maps onto canonical health-zone noms (built from the health-zone
+    # geojson). Provinces are a different namespace -- several DRC provinces
+    # happen to share a name with a health zone (Ituri, Tshopo, Kinshasa...),
+    # so running provinces through canon too would silently rewrite a
+    # province's spelling to its zone twin's if the two ever drifted. Using a
+    # canon that visibly rewrites everything proves province keys are left
+    # alone while health-zone keys go through it.
+    csv_text = (
+        "date_of_symptom_onset_imputed,onset_date_was_imputed,confirmed_case,"
+        "spatial_scale,province,health_zone\n"
+        "2026-05-02,FALSE,4,province,Ituri,NA\n"
+        "2026-05-02,FALSE,1,healthzone,NA,Bunia\n"
+    )
+    (tmp_path / "status_aggregated.csv").write_text(csv_text, encoding="utf-8")
+
+    out = ds._pack_trends_cases(tmp_path / "status_aggregated.csv", canon=lambda s: "REWRITTEN")
+
+    assert sorted(out["province"]) == ["Ituri"]           # untouched by canon
+    assert sorted(out["healthzone"]) == ["REWRITTEN"]     # passed through canon
+
+
+# --- spatial_scale case/whitespace normalisation -----------------------------
+
+def test_spatial_scale_is_normalised_for_case_and_whitespace(tmp_path):
+    # The packer does (row.get("spatial_scale") or "").strip().lower(), but
+    # every other fixture in this file already uses pre-lowercased,
+    # unpadded values -- so that normalisation is otherwise never exercised.
+    csv_text = (
+        "reporting_date,daily_deaths,cumulative_deaths,spatial_scale,province,health_zone\n"
+        "2026-05-01,1,1,National,NA,NA\n"
+        "2026-05-01,2,2, HealthZone ,NA,Bunia\n"
+    )
+    (tmp_path / "cumulative_positive_deaths.csv").write_text(csv_text, encoding="utf-8")
+
+    out = ds._pack_trends_deaths(tmp_path / "cumulative_positive_deaths.csv")
+
+    assert out["national"]["national"] == {"start": "2026-05-01", "cum": [1], "daily": [1]}
+    assert out["healthzone"]["Bunia"] == {"start": "2026-05-01", "cum": [2], "daily": [2]}

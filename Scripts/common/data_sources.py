@@ -4299,6 +4299,12 @@ _STATUS_AGG_CSV_NAME = "status_aggregated.csv"
 
 _TRENDS_SCALES = (("national", None), ("province", "province"), ("healthzone", "health_zone"))
 _TRENDS_EPOCH = "2026-01-01"
+# Built once rather than per CSV row -- every packer looks a scale up in its
+# inner loop.
+_TRENDS_SCALE_MAP = dict(_TRENDS_SCALES)
+# Distinct from None, which is the *legitimate* key_field for the national
+# scale (national rows carry no location column).
+_UNKNOWN_SCALE = object()
 
 
 def _trends_loc(row, key_field):
@@ -4335,13 +4341,18 @@ def _pack_trends_cases(path, canon=None):
     with open(path, newline="", encoding="utf-8") as fh:
         for row in csv.DictReader(fh):
             scale = (row.get("spatial_scale") or "").strip().lower()
-            key_field = dict(_TRENDS_SCALES).get(scale, "__missing__")
-            if key_field == "__missing__":
+            key_field = _TRENDS_SCALE_MAP.get(scale, _UNKNOWN_SCALE)
+            if key_field is _UNKNOWN_SCALE:
                 continue
             loc = _trends_loc(row, key_field)
             if loc is None:
                 continue
-            if key_field is not None:
+            if key_field == "health_zone":
+                # canon maps to canonical health-zone noms, so it applies to
+                # zones ONLY. Province names are a different namespace; several
+                # DRC provinces share a name with a health zone (Ituri, Tshopo,
+                # Kinshasa...), so running provinces through it would silently
+                # rewrite a province to a zone's spelling if the two ever drift.
                 loc = canon(loc)
             day = (row.get("date_of_symptom_onset_imputed") or "").strip()
             if not _ONSET_DATE_RE.match(day):
@@ -4379,13 +4390,18 @@ def _pack_trends_deaths(path, canon=None):
     with open(path, newline="", encoding="utf-8") as fh:
         for row in csv.DictReader(fh):
             scale = (row.get("spatial_scale") or "").strip().lower()
-            key_field = dict(_TRENDS_SCALES).get(scale, "__missing__")
-            if key_field == "__missing__":
+            key_field = _TRENDS_SCALE_MAP.get(scale, _UNKNOWN_SCALE)
+            if key_field is _UNKNOWN_SCALE:
                 continue
             loc = _trends_loc(row, key_field)
             if loc is None:
                 continue
-            if key_field is not None:
+            if key_field == "health_zone":
+                # canon maps to canonical health-zone noms, so it applies to
+                # zones ONLY. Province names are a different namespace; several
+                # DRC provinces share a name with a health zone (Ituri, Tshopo,
+                # Kinshasa...), so running provinces through it would silently
+                # rewrite a province to a zone's spelling if the two ever drift.
                 loc = canon(loc)
             day = (row.get("reporting_date") or "").strip()
             if not _ONSET_DATE_RE.match(day):
