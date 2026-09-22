@@ -186,10 +186,79 @@
     return true;
   }
 
+  // Normalises a place name for cross-dataset matching (zone naming drifts
+  // between feeds). Mirrors engine.js's normalizeLabLocationKey.
+  function normLoc(s) {
+    return String(s || "")
+      .normalize("NFD").replace(/[̀-ͯ]/g, "")
+      .replace(/\([^)]*\)/g, "")
+      .replace(/[^a-z0-9]+/gi, " ")
+      .trim().toLowerCase();
+  }
+
+  function labsForSelection(scope, key) {
+    var d = trends();
+    var labs = (d && d.labs) || [];
+    if (scope === "national") return labs;
+    if (!key) return [];
+    var field = scope === "health_zone" ? "health_zone" : "province";
+    var want = normLoc(key);
+    return labs.filter(function (l) { return l[field] && normLoc(l[field]) === want; });
+  }
+
+  // --- Card 4: one chart per laboratory -------------------------------------
+  function renderLab(host, lab) {
+    var d = trends(), lim = d && d.lab_x;
+    if (!lim) return false;
+    var dates = lab.dates;
+    var dim = size(host), svg = newSvg(host, dim.W, dim.H);
+    var maxTotal = lab.max_total;
+
+    var fr = C.frame(svg, {
+      width: dim.W, height: dim.H, pad: PAD,
+      xStart: lim.start, xEnd: lim.end, yMax: maxTotal
+    });
+    C.shadeRegion(svg, fr, d.incomplete_from, COLOR_INCOMPLETE);
+    C.stackedBars(svg, fr, dates, [{ values: lab.n, color: COLOR_SAMPLES }]);
+
+    // Positivity scaled onto the SAME primary axis by * max_total, exactly as
+    // the source does.
+    var sc = function (v) {
+      if (v === null || v === undefined) return null;
+      return Math.min(1, Math.max(0, v)) * maxTotal;
+    };
+    // Same opaque-fill reasoning as renderPositivity: ciBand's own
+    // fill-opacity:0.35 is the only opacity applied here.
+    C.ciBand(svg, fr, dates, lab.lo.map(sc), lab.hi.map(sc), COLOR_POSITIVITY);
+    C.line(svg, fr, dates, lab.mean.map(sc), COLOR_POSITIVITY, 1.6);
+    C.points(svg, fr, dates, lab.mean.map(sc), COLOR_POSITIVITY, 2, null);
+    C.markerLine(svg, fr, lab.earliest, COLOR_INK,
+      tr("ui.trends_lab_earliest", "Earliest Sample: ") + (lab.earliest || ""));
+
+    // Secondary axis relabelled 0-100. The source emits a 0-1 proportion under
+    // a "(%)" label; this is a LABEL change only -- every mark above is placed
+    // on the primary axis, so nothing moves.
+    C.dualAxis(svg, fr, tr("ui.trends_axis_positivity", "Sample Positivity (%)"), function (v) {
+      return String(Math.round((v / maxTotal) * 100));
+    });
+    host.appendChild(svg);
+
+    C.tooltip(host, svg, fr, function (iso) {
+      var i = dates.indexOf(iso);
+      if (i < 0) return null;
+      return '<div class="dc-tip-d">' + C.fmtDay(C.dayMs(iso)) + "</div>" +
+        "<div>" + tr("ui.trends_axis_samples", "Samples Analysed") + ": " + lab.n[i] + "</div>" +
+        "<div>" + (Math.min(1, Math.max(0, lab.mean[i])) * 100).toFixed(1) + "%</div>";
+    });
+    return true;
+  }
+
   global.TrendsCharts = {
     _renderCases: renderCases,
     _renderDeaths: renderDeaths,
     _renderPositivity: renderPositivity,
+    _renderLab: renderLab,
+    _labsForSelection: labsForSelection,
     _trends: trends,
     _xLimits: xLimits,
     _pick: pick,
