@@ -11,6 +11,10 @@
 
   var SVNS = "http://www.w3.org/2000/svg";
 
+  // Unique per chart instance: a Trends page renders 4 cards plus up to 20 lab
+  // charts in one document, and duplicate clipPath ids would cross-clip.
+  var clipSeq = 0;
+
   function svgEl(name, attrs) {
     var n = document.createElementNS(SVNS, name);
     for (var k in attrs) n.setAttribute(k, String(attrs[k]));
@@ -67,10 +71,22 @@
     }
 
     var pxPerDay = Math.abs(xToPx(t0 + 86400000) - xToPx(t0));
+
+    // Clip marks to the plot gutter so a bar centred on the axis start/end
+    // doesn't overhang the edge by half a bar width. Axis lines, ticks, tick
+    // labels and dualAxis labels are drawn above (or via dualAxis, separately)
+    // and are intentionally NOT inside this clip.
+    var clipId = "dc-clip-" + (++clipSeq);
+    var clip = svgEl("clipPath", { id: clipId });
+    clip.appendChild(svgEl("rect", {
+      x: left, y: pad.top, width: Math.max(0, right - left), height: Math.max(0, baseY - pad.top)
+    }));
+    svg.appendChild(clip);
+
     return {
       xToPx: xToPx, pxToDate: pxToDate, yToPx: yToPx, yMax: yMax,
       left: left, right: right, top: pad.top, baseY: baseY,
-      barW: Math.max(1, pxPerDay - 1), ticks: ticks
+      barW: Math.max(1, pxPerDay - 1), ticks: ticks, clipId: clipId
     };
   }
 
@@ -80,15 +96,17 @@
     if (!fromIso) return;
     var x = Math.max(fr.left, Math.min(fr.right, fr.xToPx(dayMs(fromIso))));
     if (x >= fr.right) return;
-    svg.appendChild(svgEl("rect", {
+    var g = svgEl("g", { "clip-path": "url(#" + fr.clipId + ")" });
+    g.appendChild(svgEl("rect", {
       x: x, y: fr.top, width: fr.right - x, height: fr.baseY - fr.top,
       fill: fill, "fill-opacity": 0.25
     }));
+    svg.appendChild(g);
   }
 
   // Stacked bars. `series` is [{values:[], color}] drawn bottom-up.
   function stackedBars(svg, fr, dates, series) {
-    var g = svgEl("g", {});
+    var g = svgEl("g", { "clip-path": "url(#" + fr.clipId + ")" });
     dates.forEach(function (iso, i) {
       var acc = 0;
       series.forEach(function (s) {
@@ -126,28 +144,34 @@
     });
     if (!up) return;
     down.reverse();
-    svg.appendChild(svgEl("path", {
+    var g = svgEl("g", { "clip-path": "url(#" + fr.clipId + ")" });
+    g.appendChild(svgEl("path", {
       d: up + "L" + down.join("L") + "Z", fill: fill, "fill-opacity": 0.35, stroke: "none"
     }));
+    svg.appendChild(g);
   }
 
   function line(svg, fr, dates, values, color, width) {
     var d = pathFor(fr, dates, values);
     if (!d) return;
-    svg.appendChild(svgEl("path", { d: d, fill: "none", stroke: color, "stroke-width": width || 0.9 }));
+    var g = svgEl("g", { "clip-path": "url(#" + fr.clipId + ")" });
+    g.appendChild(svgEl("path", { d: d, fill: "none", stroke: color, "stroke-width": width || 0.9 }));
+    svg.appendChild(g);
   }
 
   // `filter(i)` selects which indices get a dot (the deaths chart plots points
   // only where daily_deaths > 0).
   function points(svg, fr, dates, values, color, r, filter) {
+    var g = svgEl("g", { "clip-path": "url(#" + fr.clipId + ")" });
     dates.forEach(function (iso, i) {
       if (filter && !filter(i)) return;
       var v = values[i];
       if (v === null || v === undefined) return;
-      svg.appendChild(svgEl("circle", {
+      g.appendChild(svgEl("circle", {
         cx: fr.xToPx(dayMs(iso)), cy: fr.yToPx(v), r: r || 1.8, fill: color, stroke: "none"
       }));
     });
+    svg.appendChild(g);
   }
 
   // Dashed vertical marker plus a label (the lab charts' "Earliest Sample").
@@ -155,14 +179,17 @@
     if (!iso) return;
     var x = fr.xToPx(dayMs(iso));
     if (x < fr.left || x > fr.right) return;
-    svg.appendChild(svgEl("line", {
+    var g = svgEl("g", { "clip-path": "url(#" + fr.clipId + ")" });
+    g.appendChild(svgEl("line", {
       x1: x, y1: fr.top, x2: x, y2: fr.baseY,
       stroke: color, "stroke-width": 1, "stroke-dasharray": "3,2"
     }));
-    if (!label) return;
-    var txt = svgEl("text", { x: x + 3, y: fr.top + 9, "font-size": 8, fill: color });
-    txt.textContent = label;
-    svg.appendChild(txt);
+    if (label) {
+      var txt = svgEl("text", { x: x + 3, y: fr.top + 9, "font-size": 8, fill: color });
+      txt.textContent = label;
+      g.appendChild(txt);
+    }
+    svg.appendChild(g);
   }
 
   // Right-hand axis that RELABELS the same pixel range -- it never moves a

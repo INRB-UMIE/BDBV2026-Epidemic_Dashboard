@@ -6,16 +6,24 @@
 //
 // Every constant and rule here is transcribed from the generator at
 // BDBV2026-Processing_Code@main; see the spec's section 6 before changing any
-// of it. Colours, stacking order and captions are contractual.
+// of it. Values, series, dates, gaps, stacking order, ranges and label text
+// are contractual; colours and chart furniture follow the Genomic
+// Epidemiology tab (genomic.js) instead of the R/ggplot SVGs -- see the
+// palette block below.
 (function (global) {
   "use strict";
 
   var C = global.DashboardCharts;
 
-  var COLOR_OBS = "#9B7D4E";        // Confirmed (Observed Onset)
-  var COLOR_IMP = "#C9A266";        // Confirmed (Imputed Onset)
-  var COLOR_POSITIVITY = "#5b86b3";
-  var COLOR_DEATHS = "#7c1d1d";
+  // Palette follows the Genomic Epidemiology tab (genomic.js), not the R SVGs.
+  // The genomic "Confirmed positive cases" panel plots the SAME observed/imputed
+  // quantity as the cases card below, so both use DIST_OBS/DIST_IMP and cannot
+  // disagree about what a colour means.
+  var COLOR_OBS = "#9e2b2b";                          // genomic DIST_OBS
+  var COLOR_IMP = "#587e72";                          // genomic DIST_IMP
+  var COLOR_POSITIVITY = "#587e72";                   // genomic SkyGrid idiom
+  var COLOR_POSITIVITY_BAND = "rgba(88,126,114,0.15)";
+  var COLOR_DEATHS = "#7c1d1d";                       // genomic Ne "Exp" series
   var COLOR_SAMPLES = "#9c968b";
   var COLOR_INCOMPLETE = "#9c968b";
   var COLOR_INK = "#2a2a27";
