@@ -220,7 +220,15 @@
       width: dim.W, height: dim.H, pad: PAD,
       xStart: lim.start, xEnd: lim.end, yMax: maxTotal
     });
-    C.shadeRegion(svg, fr, d.incomplete_from, COLOR_INCOMPLETE);
+    // Per-lab, not per-frame. Lab charts share the GLOBAL x range, so
+    // incomplete_from always falls inside the frame -- but the band asserts
+    // "these recent dates may be under-reported", which says nothing useful
+    // about a lab that has no data in that window at all. The generator tests
+    // each lab's own analysis dates (incomplete_reporting_dates(lab_df$...))
+    // and omits the band when none fall in the window; match that.
+    if (dates.length && dates[dates.length - 1] >= d.incomplete_from) {
+      C.shadeRegion(svg, fr, d.incomplete_from, COLOR_INCOMPLETE);
+    }
     C.stackedBars(svg, fr, dates, [{ values: lab.n, color: COLOR_SAMPLES }]);
 
     // Positivity scaled onto the SAME primary axis by * max_total, exactly as
