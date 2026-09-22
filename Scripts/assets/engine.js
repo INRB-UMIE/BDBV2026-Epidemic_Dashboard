@@ -2837,259 +2837,25 @@ function setTrendsProvinceHover(province) {
 }
 
 function trendsPlotData() {
-  return PAYLOAD.onset_trends || null;
-}
-
-function trendsIndexes() {
-  const data = trendsPlotData();
-  return (data && data.indexes) || {};
-}
-
-function trendsIndexEntry(bucket, key) {
-  if (!key) return null;
-  const entries = trendsIndexes()[bucket] || {};
-  if (entries[key]) return entries[key];
-  const target = String(key).toLowerCase();
-  const keys = Object.keys(entries);
-  for (let i = 0; i < keys.length; i++) {
-    if (String(keys[i]).toLowerCase() === target) return entries[keys[i]];
-  }
-  return null;
-}
-
-// Always returns a real array, however the manifest happens to have shaped
-// lab_codes (missing, a single string, etc.) -- a non-array value here used
-// to reach a bare .forEach() downstream and throw, which silently froze the
-// whole labs card (the exception aborted renderTrendsLabs() before it could
-// update the DOM, so it just kept showing whatever the previous selection
-// had rendered).
-function asCodeArray(v) {
-  if (Array.isArray(v)) return v;
-  if (v == null || v === "") return [];
-  return [v];
-}
-
-function trendsLabCodesForSelection() {
-  if (trendsScope === "health_zone" && trendsSelectedKey) {
-    const entry = trendsIndexEntry("by_health_zone", trendsSelectedKey);
-    return asCodeArray(entry && entry.lab_codes);
-  }
-  if (trendsScope === "province" && trendsSelectedKey) {
-    const entry = trendsIndexEntry("by_province", trendsSelectedKey);
-    return asCodeArray(entry && entry.lab_codes);
-  }
-  return [];
-}
-
-// Normalizes a place name for cross-dataset matching: strips accents,
-// drops parenthetical suffixes ("Idiofa (Secteur)"), and collapses
-// punctuation/whitespace. Health zone naming has historically drifted a bit
-// between data feeds (see _NAME_TO_NOM on the Python side), so lab metadata
-// doesn't always spell a zone name exactly the same way the case/geometry
-// data does.
-function normalizeLabLocationKey(s) {
-  return String(s || "")
-    .normalize("NFD").replace(/[̀-ͯ]/g, "")
-    .replace(/\([^)]*\)/g, "")
-    .replace(/[^a-z0-9]+/gi, " ")
-    .trim()
-    .toLowerCase();
-}
-
-function trendsLabsForSelection() {
-  const data = trendsPlotData() || {};
-  const labs = data.labs || [];
-  // National shows every lab -- no province/health-zone subsetting needed.
-  if (trendsScope === "national") return labs;
-  if (!trendsSelectedKey) return [];
-
-  // Match each lab's own health_zone/province field against the current
-  // selection directly, rather than relying solely on the manifest's
-  // indexes.by_health_zone/by_province reverse lookup -- in practice that
-  // index hasn't always been populated for every health zone.
-  const candidateKeys = (trendsScope === "health_zone"
-    ? [trendsSelectedKey, zoneDisplayName(trendsSelectedKey)]
-    : [trendsSelectedKey]
-  ).map(normalizeLabLocationKey).filter(Boolean);
-  const labField = trendsScope === "health_zone" ? "health_zone" : "province";
-  const direct = labs.filter(function(lab) {
-    const val = lab[labField];
-    return val && candidateKeys.indexOf(normalizeLabLocationKey(val)) !== -1;
-  });
-
-  // Union in anything the manifest's index knows about that the direct
-  // field match missed.
-  const codes = trendsLabCodesForSelection();
-  if (codes.length) {
-    const byCode = data.labs_by_code || {};
-    const seen = new Set(direct.map(function(l) { return l.lab_code || l.id; }));
-    codes.forEach(function(code) {
-      const lab = byCode[code];
-      const key = lab && (lab.lab_code || lab.id);
-      if (lab && key && !seen.has(key)) {
-        direct.push(lab);
-        seen.add(key);
-      }
-    });
-  }
-  return direct;
-}
-
-function findTrendsLab(id) {
-  const labs = (trendsPlotData() && trendsPlotData().labs) || [];
-  for (let i = 0; i < labs.length; i++) {
-    if (labs[i].id === id) return labs[i];
-  }
-  return null;
+  return PAYLOAD.trends || null;
 }
 
 function trendsEntityList() {
   const data = trendsPlotData();
   if (!data) return [];
+  // Cases only -- NOT the union with deaths/positivity. Five health zones have
+  // positivity rows but no confirmed cases and must stay out of the dropdown.
   if (trendsScope === "province") {
-    return Object.keys(data.provinces || data.plots || {}).sort(function(a, b) {
+    return Object.keys((data.cases && data.cases.provinces) || {}).sort(function(a, b) {
       return String(a).localeCompare(String(b), undefined, {sensitivity: "base"});
-    }).map(function(id) {
-      return {id: id, label: id, kind: "province"};
-    });
+    }).map(function(id) { return {id: id, label: id, kind: "province"}; });
   }
   if (trendsScope === "health_zone") {
-    return Object.keys(data.health_zones || {}).sort(function(a, b) {
+    return Object.keys((data.cases && data.cases.health_zones) || {}).sort(function(a, b) {
       return String(a).localeCompare(String(b), undefined, {sensitivity: "base"});
-    }).map(function(id) {
-      return {id: id, label: zoneDisplayName(id) || id, kind: "health_zone"};
-    });
+    }).map(function(id) { return {id: id, label: zoneDisplayName(id) || id, kind: "health_zone"}; });
   }
   return [{id: "national", label: t("ui.trends_scope_national"), kind: "national"}];
-}
-
-function resolveTrendsPlot() {
-  const data = trendsPlotData();
-  if (!data) return null;
-  if (trendsScope === "national") return data.national || null;
-  if (trendsScope === "province") {
-    if (!trendsSelectedKey) return null;
-    return (data.provinces && data.provinces[trendsSelectedKey]) ||
-      (data.plots && data.plots[trendsSelectedKey]) || null;
-  }
-  if (trendsScope === "health_zone") {
-    if (!trendsSelectedKey) return null;
-    return (data.health_zones && data.health_zones[trendsSelectedKey]) || null;
-  }
-  return null;
-}
-
-// Every plot SVG from the data pipeline bakes its own chart title into the
-// top of the image (in the same spot the card header's title already
-// shows), plus a bit of margin above the actual chart panel. Rather than
-// leaving that redundant text (and blank space) visible, shift the SVG's
-// viewBox down to crop it off entirely instead of just visually clipping a
-// gap. Every plot type currently shares the same 648x324 canvas with a
-// 25.28pt top margin before the chart panel starts, so one fixed crop
-// works everywhere; if a plot ever uses a different margin, the regex
-// simply won't match cleanly enough to matter -- worst case the title
-// stays visible rather than the chart getting mangled.
-const PLOT_SVG_TITLE_CROP = 40.56; // 26 + 20% + 30%
-function cropPlotSvgTop(svg, cropPx) {
-  if (!svg) return svg;
-  const m = svg.match(/viewBox=(['"])\s*([\d.\-]+)\s+([\d.\-]+)\s+([\d.\-]+)\s+([\d.\-]+)\s*\1/);
-  if (!m) return svg;
-  const quote = m[1];
-  const minX = parseFloat(m[2]);
-  const minY = parseFloat(m[3]);
-  const w = parseFloat(m[4]);
-  const h = parseFloat(m[5]);
-  if (!isFinite(minX) || !isFinite(minY) || !isFinite(w) || !isFinite(h)) return svg;
-  if (!(cropPx > 0) || cropPx >= h) return svg;
-  const newViewBox = minX + " " + (minY + cropPx) + " " + w + " " + (h - cropPx);
-  return svg.replace(m[0], "viewBox=" + quote + newViewBox + quote);
-}
-
-// Shared renderer for every card in #trends-plots-column: fills in the SVG
-// (or an appropriate empty-state message) for whichever plot was resolved.
-// #trends (confirmed cases), #trends-deaths (cumulative deaths), and
-// #trends-positivity (rolling test positivity) all use this -- future plot
-// cards should too, rather than re-implementing the empty-state copy.
-function renderPlotCard(titleId, bodyId, plot, fallbackTitleKey) {
-  const titleEl = document.getElementById(titleId);
-  const body = document.getElementById(bodyId);
-  if (!body) return;
-  if (plot && plot.svg) {
-    // Built from the localized plot-type label + place name rather than
-    // plot.title (the SVG's own baked title) -- that text is generated once
-    // in English by the data pipeline and never changes with the language
-    // toggle. Place names (provinces/health zones) are proper nouns with no
-    // separate French form in this dataset, so only the type label and
-    // "National" need localizing.
-    if (titleEl) {
-      const place = plot.id === "national" ? t("ui.trends_scope_national") : (plot.label || plot.id || "");
-      titleEl.textContent = place ? (t(fallbackTitleKey) + " - " + place) : t(fallbackTitleKey);
-    }
-    body.className = "panel-body";
-    body.innerHTML = "<div class='onset-chart-wrap'>" + cropPlotSvgTop(plot.svg, PLOT_SVG_TITLE_CROP) + "</div>";
-    return;
-  }
-  if (titleEl) titleEl.textContent = t(fallbackTitleKey);
-  body.className = "panel-body trends-empty";
-  if (trendsScope === "national") {
-    body.innerHTML = "<p>" + escHtml(t("ui.trends_no_plot").replace("{name}", t("ui.trends_scope_national"))) + "</p>";
-  } else if (trendsScope === "province") {
-    body.innerHTML = "<p>" + escHtml(
-      trendsSelectedKey
-        ? tf("ui.trends_no_plot", {name: trendsSelectedKey})
-        : t("ui.trends_select_province")
-    ) + "</p>";
-  } else if (trendsScope === "health_zone") {
-    body.innerHTML = "<p>" + escHtml(
-      trendsSelectedKey
-        ? tf("ui.trends_no_plot", {name: zoneDisplayName(trendsSelectedKey) || trendsSelectedKey})
-        : t("ui.trends_select_health_zone")
-    ) + "</p>";
-  }
-}
-
-function renderTrendsPlot() {
-  renderPlotCard("trends-title", "trends-body", resolveTrendsPlot(), "ui.trends_panel");
-}
-
-function resolveCumulativeDeathsPlot() {
-  const data = trendsPlotData();
-  const deaths = data && data.cumulative_deaths;
-  if (!deaths) return null;
-  if (trendsScope === "national") return deaths.national || null;
-  if (trendsScope === "province") {
-    if (!trendsSelectedKey) return null;
-    return (deaths.provinces && deaths.provinces[trendsSelectedKey]) || null;
-  }
-  if (trendsScope === "health_zone") {
-    if (!trendsSelectedKey) return null;
-    return (deaths.health_zones && deaths.health_zones[trendsSelectedKey]) || null;
-  }
-  return null;
-}
-
-function resolveRollingPositivityPlot() {
-  const data = trendsPlotData();
-  const positivity = data && data.rolling_positivity;
-  if (!positivity) return null;
-  if (trendsScope === "national") return positivity.national || null;
-  if (trendsScope === "province") {
-    if (!trendsSelectedKey) return null;
-    return (positivity.provinces && positivity.provinces[trendsSelectedKey]) || null;
-  }
-  if (trendsScope === "health_zone") {
-    if (!trendsSelectedKey) return null;
-    return (positivity.health_zones && positivity.health_zones[trendsSelectedKey]) || null;
-  }
-  return null;
-}
-
-function renderCumulativeDeathsPlot() {
-  renderPlotCard("trends-deaths-title", "trends-deaths-body", resolveCumulativeDeathsPlot(), "ui.trends_deaths_panel");
-}
-
-function renderRollingPositivityPlot() {
-  renderPlotCard("trends-positivity-title", "trends-positivity-body", resolveRollingPositivityPlot(), "ui.trends_positivity_panel");
 }
 
 function trendsSelectionLabel() {
@@ -3101,69 +2867,28 @@ function trendsSelectionLabel() {
   return trendsSelectedKey;
 }
 
-function renderTrendsLabs() {
-  const card = document.getElementById("trends-labs");
-  const titleEl = document.getElementById("trends-labs-title");
-  const body = document.getElementById("trends-labs-body");
-  if (!card || !body) return;
-
-  // National always shows (every lab); province/health zone need a selection first.
-  const show = trendsScope === "national" ||
-    ((trendsScope === "province" || trendsScope === "health_zone") && trendsSelectedKey);
-  card.style.display = show ? "" : "none";
-  if (!show) {
-    body.innerHTML = "";
-    body.className = "panel-body trends-empty";
-    return;
-  }
-
-  // Set the title before computing labs: an unexpected manifest/lab data
-  // shape used to throw inside trendsLabsForSelection() and silently freeze
-  // this whole card -- everything after the throw (including the title)
-  // never ran, so it just kept showing the previous selection.
-  const locationLabel = trendsSelectionLabel();
-  if (titleEl) {
-    titleEl.textContent = tf("ui.trends_labs_panel", {location: locationLabel});
-  }
-
-  let labs = [];
-  try {
-    labs = trendsLabsForSelection();
-  } catch (err) {
-    console.error("trendsLabsForSelection failed for", trendsScope, trendsSelectedKey, err);
-    labs = [];
-  }
-
-  if (!labs.length) {
-    body.className = "panel-body trends-empty";
-    body.innerHTML = "<p>" + escHtml(tf("ui.trends_no_labs", {name: locationLabel})) + "</p>";
-    return;
-  }
-
-  try {
-    body.className = "panel-body trends-labs-body";
-    body.innerHTML = labs.map(function(lab) {
-      return "<div class='trends-lab-subplot'>" +
-        "<h4 class='trends-lab-subplot-title'>" + escHtml(lab.label || lab.lab_code || lab.id) + "</h4>" +
-        "<div class='onset-chart-wrap'>" + cropPlotSvgTop(lab.svg, PLOT_SVG_TITLE_CROP) + "</div>" +
-        "</div>";
-    }).join("");
-  } catch (err) {
-    console.error("renderTrendsLabs markup failed for", trendsScope, trendsSelectedKey, err);
-    body.className = "panel-body trends-empty";
-    body.innerHTML = "<p>" + escHtml(tf("ui.trends_no_labs", {name: locationLabel})) + "</p>";
-  }
-}
-
-// Renders every card in the plots column. Call sites that used to call
-// renderTrendsPlot() directly now call this instead, so the deaths card
-// (and any future card) stays in sync with the scope/selection too.
+// Renders every card in the plots column. All four cards are drawn by
+// trends.js (page-scoped to trends.html) from PAYLOAD.trends; engine.js
+// still owns the scope/selection state and the map.
 function renderTrendsPlots() {
-  renderTrendsPlot();
-  renderCumulativeDeathsPlot();
-  renderRollingPositivityPlot();
-  renderTrendsLabs();
+  if (window.TrendsCharts) {
+    window.TrendsCharts.render({scope: trendsScope, key: trendsSelectedKey});
+  }
 }
+
+window.trendsEmptyMessage = function() {
+  if (trendsScope === "national") {
+    return escHtml(tf("ui.trends_no_plot", {name: t("ui.trends_scope_national")}));
+  }
+  if (trendsScope === "province") {
+    return escHtml(trendsSelectedKey
+      ? tf("ui.trends_no_plot", {name: trendsSelectedKey})
+      : t("ui.trends_select_province"));
+  }
+  return escHtml(trendsSelectedKey
+    ? tf("ui.trends_no_plot", {name: zoneDisplayName(trendsSelectedKey) || trendsSelectedKey})
+    : t("ui.trends_select_health_zone"));
+};
 
 // fitMapToTrendsSelection() used to live here and auto pan/zoom the map to
 // whichever province/health zone was selected, with padding carved out for
