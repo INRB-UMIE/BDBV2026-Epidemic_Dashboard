@@ -1,7 +1,7 @@
 # Epidemiological Trends: replace pre-rendered SVGs with dynamic charts
 
 **Date:** 2026-09-22
-**Status:** Design — awaiting review
+**Status:** Design — approved; open decisions resolved (D6, D7)
 **Scope:** `trends.html` (the "Epidemiological Trends" tab) only
 
 ---
@@ -79,6 +79,8 @@ in this project).
 | D2 | Hand-rolled SVG via a shared `assets/charts.js`, no charting library | Matches `genomic.js`; no new dependency; ~70% of the primitives already exist there. |
 | D3 | Visual parity + hover tooltips only | The brief is to present the same data the same way, dynamically. |
 | D4 | Extract `charts.js` now; migrate `genomic.js` onto it in a follow-up | Zero regression risk to the recently-finished genomic tab; accepts temporary duplication. |
+| D6 | Lab secondary axis renders **0–100**, correcting the source's 0–1 under a `(%)` label | Resolves O1. Geometry is unchanged — only tick labels differ (see §6.5). |
+| D7 | Incomplete-reporting cutoff = **`snapshot_date - incomplete_days`**, read from the manifest once the pipeline records it | Resolves O2. Closest faithful reproduction available to the dashboard; never computed in the browser. |
 | D5 | Carry **full float precision** for all positivity values — no rounding anywhere | Costs +115 KB on the positivity slice alone (124 KB at 3dp → 238 KB); total slice 363 KB vs 5.35 MB today, still ~15× smaller. Removes an entire class of "did a number change?" question. Fidelity is worth more than the bytes. |
 
 ## 5. Provenance of the fidelity contract — IMPORTANT
@@ -207,7 +209,21 @@ dashboard does not show. Build it from the cases family alone.
 - `max_total = max(1, max(total_samples_analysed_daily))` **for that lab**.
 - Positivity clamped to `[0, 1]` then scaled by `* max_total`; ribbon/line/points
   as in §6.4.
-- Secondary axis `~ . / max_total`, name `Sample Positivity (%)` — see §10-O1.
+- Secondary axis, name `Sample Positivity (%)`, rendering **0–100**
+  (**decided — D6**, correcting the source; see §10-O1).
+
+  The source computes `sec_axis(~ . / max_total)`, which yields a 0–1
+  proportion under a `(%)` label. We label the same axis 0–100 instead.
+
+  **This changes tick labels only.** The ribbon, line and points are positioned
+  on the *primary* axis as `clamp(value) * max_total`; the secondary axis is a
+  pure relabelling of that same pixel range. Plotted geometry is identical
+  either way, so there is no risk of moving a mark. Concretely, the right-hand
+  axis of `lab_inrbk.svg` reads `0.00 / 0.25 / 0.50 / 0.75 / 1.00` today and
+  will read `0 / 25 / 50 / 75 / 100`.
+
+  This is the one intentional departure from current appearance in this change,
+  and it exists to stop a positivity of 0.67 being readable as "0.67%".
 - Dashed vertical line at that lab's `earliest_analysed_sample`, `COLOR_INK`.
 - Text annotation `Earliest Sample: YYYY-MM-DD` at `y = max_total * 1.02`,
   `hjust = -0.05`, size 3.2, `COLOR_INK`.
@@ -241,7 +257,13 @@ Lab charts use the global lab range from §6.5 instead.
   plot height, fill `COLOR_INCOMPLETE` at alpha 0.25, **drawn beneath the data**.
 - When no date falls in the window, **no band is drawn and the caption loses
   its incomplete-note sentence** (§6.2–6.4). The two vary together.
-- The cutoff basis is an open decision — see §10-O2.
+- **Cutoff basis (decided — D7):** `snapshot_date - incomplete_days`, where
+  `snapshot_date` is the `outputs/<date>` folder name, resolved **at build
+  time** and shipped as `trends.incomplete_from`. If the pipeline later records
+  the exact cutoff in `manifest.json` (§11.4), read that instead and this
+  approximation retires.
+- **Never compute the cutoff in the browser.** `new Date()` would let the band
+  drift as a page ages between builds. See §10-O2.
 
 ## 7. Implementation
 
@@ -402,6 +424,10 @@ deliverable, not an afterthought.
    and compare side by side against the retained production SVG for the same
    location and snapshot. Manual gate, on: national, one province (Ituri), one
    health zone, and two labs (one dense, one sparse). Reviewed before merge.
+
+   **One expected difference:** the lab charts' right-hand axis labels change
+   from `0.00–1.00` to `0–100` (D6/§6.5). Every mark must sit in the same
+   place; only those labels may differ. Any other difference is a bug.
 6. **Empty/edge states.** A location with a single data point; a location whose
    positivity series is empty while cases exist; a snapshot whose latest date
    is older than the incomplete window (band absent → caption must lose its
@@ -424,9 +450,12 @@ signed off under (5).
 | Dropdown silently widens to positivity-only zones | §6.1 makes the cases family authoritative; asserted by §8.3 |
 | Stale-source error recurs | §5 is explicit that a local checkout is not authoritative |
 
-## 10. Open decisions requiring sign-off
+## 10. Resolved decisions
 
-**O1 — Lab secondary axis is mislabelled in the source.**
+Both items below were open at review and have been decided. Rationale is kept
+because each one changes something user-visible.
+
+**O1 — Lab secondary axis mislabelled in the source. RESOLVED: fix it (b).**
 `sec_axis(~ . / max_total)` with `mean_scaled = clamp(mean) * max_total` yields
 a secondary axis reading **0–1**, while its name is `Sample Positivity (%)`.
 Confirmed in the production SVG `lab_inrbk.svg`, whose secondary ticks are
@@ -439,12 +468,13 @@ quantity identically but on different scales.
 - **(b) Render 0–100 to match §6.4** — internally consistent and correct, but
   the lab card changes appearance versus today.
 
-Recommendation: **(b)**, and report the mislabel upstream so the SVGs and the
-dashboard converge. A number presented under the wrong unit is the one kind of
-"different from today" worth accepting, and it is the mislabel — not the fix —
-that misrepresents the data. **Needs an explicit decision.**
+**Decided: (b).** Render 0–100, and report the mislabel upstream so the SVGs and
+the dashboard converge. A number presented under the wrong unit is the one kind
+of "different from today" worth accepting, and it is the mislabel — not the fix
+— that misrepresents the data. Implementation detail in §6.5: tick labels only,
+geometry untouched.
 
-**O2 — Basis for the incomplete-reporting cutoff.**
+**O2 — Basis for the incomplete-reporting cutoff. RESOLVED: (a) + upstream ask.**
 `incomplete_reporting_dates()` uses `Sys.Date() - n_days`, i.e. the wall-clock
 date **when the R pipeline ran**. That date is not recorded in any output.
 
@@ -457,11 +487,13 @@ date **when the R pipeline ran**. That date is not recorded in any output.
   shade a window its own data does not support. This is the one option that
   actively misrepresents.
 
-Recommendation: **(a)** now, plus an upstream ask that the pipeline write the
-exact cutoff into `manifest.json` (e.g. `incomplete_styling.cutoff`), after
-which we read it and the question closes permanently.
+**Decided: (a)** now — `snapshot_date - n_days`, resolved at build time — plus an
+upstream ask that the pipeline write the exact cutoff into `manifest.json`
+(e.g. `incomplete_styling.cutoff`), after which we read it and the question
+closes permanently. Until then the two can differ by the sync lag between the
+pipeline run and the snapshot folder date; §8.6 covers the band-absent case.
 
-**O3 — `MVE` in the deaths caption.** French acronym (*maladie à virus Ebola*)
+**O3 — `MVE` in the deaths caption. Open, non-blocking.** French acronym (*maladie à virus Ebola*)
 appearing in the English caption. Retained verbatim by default. Rendering it as
 `EVD` in EN and `MVE` in FR is a one-line i18n change if wanted — flagging
 rather than deciding, since it is user-visible wording.
@@ -471,5 +503,5 @@ rather than deciding, since it is user-visible wording.
 1. Migrate `genomic.js` onto `charts.js` and delete its duplicated primitives (D4).
 2. Publish an allowlisted public aggregate feed and read that instead (D1).
 3. Ask the R pipeline to stop emitting the now-unused SVG families.
-4. Ask the R pipeline to record the incomplete-reporting cutoff (O2).
-5. Report the lab secondary-axis mislabel upstream (O1).
+4. Ask the R pipeline to record the incomplete-reporting cutoff in `manifest.json` (**confirmed follow-up**, D7/O2).
+5. Report the lab secondary-axis mislabel upstream so the SVGs match the dashboard (**confirmed follow-up**, D6/O1).
