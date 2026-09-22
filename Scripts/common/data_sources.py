@@ -4482,6 +4482,72 @@ def _pack_trends_positivity(path, canon=None):
     return packed
 
 
+def _pack_trends_labs(path):
+    """(labs[], lab_x) from lab_positivity_aggregated.csv.
+
+    Returns a list sorted by lab_name and the SHARED x range used by every lab
+    chart: [earliest sample across ALL labs, latest analysis date across ALL
+    labs] (spec 6.5). That range is global on purpose -- it is what makes the
+    per-lab charts comparable -- so do not narrow it per lab.
+    """
+    by_lab = {}
+    with open(path, newline="", encoding="utf-8") as fh:
+        for row in csv.DictReader(fh):
+            code = (row.get("lab_name") or "").strip()
+            day = (row.get("lab_analysis_date") or "").strip()
+            if not code or not _ONSET_DATE_RE.match(day):
+                continue
+            mean = _parse_optional_float(row.get("daily_positivity_mean"))
+            if mean is None:
+                continue
+            long_name = (row.get("lab_name_long") or "").strip()
+            hz = (row.get("health_zone") or "").strip()
+            prov = (row.get("province") or "").strip()
+            earliest = (row.get("earliest_analysed_sample") or "").strip()
+            lab = by_lab.setdefault(code, {
+                "id": "lab_" + _slugify_plot_key(code),
+                "code": code,
+                "label": long_name or code,
+                "health_zone": hz if hz and hz.upper() != "NA" else None,
+                "province": prov if prov and prov.upper() != "NA" else None,
+                "earliest": earliest if _ONSET_DATE_RE.match(earliest) else None,
+                "rows": {},
+            })
+            lab["rows"][day] = (
+                _i0(row.get("total_samples_analysed_daily")),
+                mean,
+                _parse_optional_float(row.get("daily_positivity_lower")),
+                _parse_optional_float(row.get("daily_positivity_upper")),
+            )
+
+    labs, starts, ends = [], [], []
+    for code in sorted(by_lab):
+        lab = by_lab[code]
+        days = sorted(lab["rows"])
+        if not days:
+            continue
+        counts = [lab["rows"][d][0] for d in days]
+        labs.append({
+            "id": lab["id"],
+            "code": code,
+            "label": lab["label"],
+            "health_zone": lab["health_zone"],
+            "province": lab["province"],
+            "earliest": lab["earliest"],
+            "dates": days,
+            "n": counts,
+            "mean": [lab["rows"][d][1] for d in days],
+            "lo": [lab["rows"][d][2] for d in days],
+            "hi": [lab["rows"][d][3] for d in days],
+            "max_total": max(1, max(counts)),
+        })
+        starts.append(lab["earliest"] or days[0])
+        ends.append(days[-1])
+
+    lab_x = {"start": min(starts), "end": max(ends)} if labs else None
+    return labs, lab_x
+
+
 def _onset_manifest_dated_dir(base: Path):
     """The dated ``outputs/<date>/`` dir the onset SVGs are read from.
 

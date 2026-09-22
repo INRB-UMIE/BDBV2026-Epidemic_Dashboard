@@ -388,3 +388,176 @@ def test_positivity_no_epoch_or_leading_trim(tmp_path):
     nat = out["national"]["national"]
     assert nat["dates"] == ["2025-12-31", "2026-01-01"]
     assert nat["mean"] == [0.3, 0.4]
+
+
+LAB_CSV = (
+    "lab_name,lab_name_long,health_zone,province,lab_analysis_date,earliest_analysed_sample,"
+    "confirmed_case,total_samples_analysed_daily,rolling_confirmed,rolling_total,"
+    "daily_positivity_mean,daily_positivity_lower,daily_positivity_upper\n"
+    "INRBK,INRB Kinshasa,NA,NA,2026-05-14,2026-05-14,4,6,4,6,0.666,0.3,0.9\n"
+    "INRBK,INRB Kinshasa,NA,NA,2026-05-16,2026-05-14,1,1,5,7,0.714,0.36,0.92\n"
+    "LBARU,Aru,Aru,Ituri,2026-06-01,2026-06-01,1,2,1,2,0.5,0.2,0.8\n"
+)
+
+
+def test_labs_pack_per_lab_with_a_shared_global_x_range(tmp_path):
+    (tmp_path / "lab_positivity_aggregated.csv").write_text(LAB_CSV, encoding="utf-8")
+
+    labs, lab_x = ds._pack_trends_labs(tmp_path / "lab_positivity_aggregated.csv")
+
+    # Shared across ALL labs so they stay comparable (spec 6.5), not per-lab.
+    assert lab_x == {"start": "2026-05-14", "end": "2026-06-01"}
+
+    assert [l["code"] for l in labs] == ["INRBK", "LBARU"]      # sorted by lab_name
+    inrbk = labs[0]
+    assert inrbk["label"] == "INRB Kinshasa"
+    assert inrbk["id"] == "lab_inrbk"
+    assert inrbk["earliest"] == "2026-05-14"
+    assert inrbk["dates"] == ["2026-05-14", "2026-05-16"]       # sparse, not zero-filled
+    assert inrbk["n"] == [6, 1]
+    assert inrbk["max_total"] == 6                              # per-lab, drives the 2nd axis
+    assert inrbk["health_zone"] is None and inrbk["province"] is None
+    assert labs[1]["health_zone"] == "Aru" and labs[1]["province"] == "Ituri"
+
+
+def test_labs_x_range_is_global_union_not_per_lab(tmp_path):
+    # Three labs with clearly non-overlapping spans. A per-lab implementation
+    # would give each lab its own narrow range; lab_x must be the union across
+    # ALL of them (spec 6.5), because it's what makes the per-lab charts
+    # visually comparable.
+    csv_text = (
+        "lab_name,lab_name_long,health_zone,province,lab_analysis_date,earliest_analysed_sample,"
+        "confirmed_case,total_samples_analysed_daily,rolling_confirmed,rolling_total,"
+        "daily_positivity_mean,daily_positivity_lower,daily_positivity_upper\n"
+        "AAA,Lab A,NA,NA,2026-02-01,2026-02-01,1,1,1,1,0.5,0.2,0.8\n"
+        "BBB,Lab B,NA,NA,2026-05-01,2026-05-01,1,1,1,1,0.5,0.2,0.8\n"
+        "CCC,Lab C,NA,NA,2026-08-01,2026-08-01,1,1,1,1,0.5,0.2,0.8\n"
+    )
+    (tmp_path / "lab_positivity_aggregated.csv").write_text(csv_text, encoding="utf-8")
+
+    labs, lab_x = ds._pack_trends_labs(tmp_path / "lab_positivity_aggregated.csv")
+
+    assert lab_x == {"start": "2026-02-01", "end": "2026-08-01"}
+
+
+def test_labs_max_total_is_per_lab_not_global(tmp_path):
+    # Two labs with very different sample counts. Each lab's max_total must
+    # reflect only its own counts -- a globalised implementation would give
+    # both labs the same (larger) max_total.
+    csv_text = (
+        "lab_name,lab_name_long,health_zone,province,lab_analysis_date,earliest_analysed_sample,"
+        "confirmed_case,total_samples_analysed_daily,rolling_confirmed,rolling_total,"
+        "daily_positivity_mean,daily_positivity_lower,daily_positivity_upper\n"
+        "SMALL,Small Lab,NA,NA,2026-05-01,2026-05-01,1,3,1,3,0.3,0.1,0.5\n"
+        "SMALL,Small Lab,NA,NA,2026-05-02,2026-05-01,1,2,2,5,0.4,0.2,0.6\n"
+        "BIG,Big Lab,NA,NA,2026-05-01,2026-05-01,1,50,1,50,0.2,0.1,0.3\n"
+        "BIG,Big Lab,NA,NA,2026-05-02,2026-05-01,1,80,2,130,0.3,0.2,0.4\n"
+    )
+    (tmp_path / "lab_positivity_aggregated.csv").write_text(csv_text, encoding="utf-8")
+
+    labs, lab_x = ds._pack_trends_labs(tmp_path / "lab_positivity_aggregated.csv")
+
+    by_code = {l["code"]: l for l in labs}
+    assert by_code["SMALL"]["max_total"] == 3
+    assert by_code["BIG"]["max_total"] == 80
+
+
+def test_labs_max_total_floors_at_one(tmp_path):
+    # All-zero counts must not leave max_total at 0 -- that would divide by
+    # zero when the positivity overlay is scaled onto the samples axis.
+    csv_text = (
+        "lab_name,lab_name_long,health_zone,province,lab_analysis_date,earliest_analysed_sample,"
+        "confirmed_case,total_samples_analysed_daily,rolling_confirmed,rolling_total,"
+        "daily_positivity_mean,daily_positivity_lower,daily_positivity_upper\n"
+        "ZERO,Zero Lab,NA,NA,2026-05-01,2026-05-01,0,0,0,0,0.0,0.0,0.0\n"
+        "ZERO,Zero Lab,NA,NA,2026-05-02,2026-05-01,0,0,0,0,0.0,0.0,0.0\n"
+    )
+    (tmp_path / "lab_positivity_aggregated.csv").write_text(csv_text, encoding="utf-8")
+
+    labs, lab_x = ds._pack_trends_labs(tmp_path / "lab_positivity_aggregated.csv")
+
+    assert labs[0]["max_total"] == 1
+
+
+def test_labs_x_start_falls_back_to_first_analysis_date_when_earliest_sample_blank(tmp_path):
+    # When earliest_analysed_sample is blank/invalid, the packer must fall
+    # back to the lab's own first analysis date for the purposes of the
+    # global x-range, and the stored `earliest` field itself must be None
+    # (not silently substituted).
+    csv_text = (
+        "lab_name,lab_name_long,health_zone,province,lab_analysis_date,earliest_analysed_sample,"
+        "confirmed_case,total_samples_analysed_daily,rolling_confirmed,rolling_total,"
+        "daily_positivity_mean,daily_positivity_lower,daily_positivity_upper\n"
+        "NOEARLY,No Early Lab,NA,NA,2026-07-10,NA,1,4,1,4,0.4,0.2,0.6\n"
+        "NOEARLY,No Early Lab,NA,NA,2026-07-12,NA,1,2,2,6,0.5,0.2,0.6\n"
+    )
+    (tmp_path / "lab_positivity_aggregated.csv").write_text(csv_text, encoding="utf-8")
+
+    labs, lab_x = ds._pack_trends_labs(tmp_path / "lab_positivity_aggregated.csv")
+
+    assert labs[0]["earliest"] is None
+    assert lab_x == {"start": "2026-07-10", "end": "2026-07-12"}
+
+
+def test_labs_label_falls_back_to_lab_name_when_long_name_blank(tmp_path):
+    csv_text = (
+        "lab_name,lab_name_long,health_zone,province,lab_analysis_date,earliest_analysed_sample,"
+        "confirmed_case,total_samples_analysed_daily,rolling_confirmed,rolling_total,"
+        "daily_positivity_mean,daily_positivity_lower,daily_positivity_upper\n"
+        "NOLONG,,NA,NA,2026-05-01,2026-05-01,1,3,1,3,0.3,0.1,0.5\n"
+    )
+    (tmp_path / "lab_positivity_aggregated.csv").write_text(csv_text, encoding="utf-8")
+
+    labs, lab_x = ds._pack_trends_labs(tmp_path / "lab_positivity_aggregated.csv")
+
+    assert labs[0]["label"] == "NOLONG"
+
+
+def test_labs_dates_stay_sparse_across_a_gap(tmp_path):
+    csv_text = (
+        "lab_name,lab_name_long,health_zone,province,lab_analysis_date,earliest_analysed_sample,"
+        "confirmed_case,total_samples_analysed_daily,rolling_confirmed,rolling_total,"
+        "daily_positivity_mean,daily_positivity_lower,daily_positivity_upper\n"
+        "GAPPY,Gappy Lab,NA,NA,2026-05-01,2026-05-01,1,3,1,3,0.3,0.1,0.5\n"
+        "GAPPY,Gappy Lab,NA,NA,2026-05-10,2026-05-01,1,2,2,5,0.4,0.2,0.6\n"
+    )
+    (tmp_path / "lab_positivity_aggregated.csv").write_text(csv_text, encoding="utf-8")
+
+    labs, lab_x = ds._pack_trends_labs(tmp_path / "lab_positivity_aggregated.csv")
+
+    assert labs[0]["dates"] == ["2026-05-01", "2026-05-10"]
+    assert labs[0]["n"] == [3, 2]
+
+
+def test_labs_x_start_uses_earliest_sample_when_it_predates_first_analysis(tmp_path):
+    # earliest_analysed_sample can be well before the lab's first analysis
+    # row (samples collected before they were processed). lab_x["start"]
+    # must use that earlier date, not just the first row in `dates`.
+    csv_text = (
+        "lab_name,lab_name_long,health_zone,province,lab_analysis_date,earliest_analysed_sample,"
+        "confirmed_case,total_samples_analysed_daily,rolling_confirmed,rolling_total,"
+        "daily_positivity_mean,daily_positivity_lower,daily_positivity_upper\n"
+        "EARLY,Early Lab,NA,NA,2026-06-15,2026-05-01,1,4,1,4,0.4,0.2,0.6\n"
+    )
+    (tmp_path / "lab_positivity_aggregated.csv").write_text(csv_text, encoding="utf-8")
+
+    labs, lab_x = ds._pack_trends_labs(tmp_path / "lab_positivity_aggregated.csv")
+
+    assert labs[0]["earliest"] == "2026-05-01"
+    assert labs[0]["dates"] == ["2026-06-15"]
+    assert lab_x == {"start": "2026-05-01", "end": "2026-06-15"}
+
+
+def test_labs_x_is_none_when_no_lab_has_a_usable_mean(tmp_path):
+    csv_text = (
+        "lab_name,lab_name_long,health_zone,province,lab_analysis_date,earliest_analysed_sample,"
+        "confirmed_case,total_samples_analysed_daily,rolling_confirmed,rolling_total,"
+        "daily_positivity_mean,daily_positivity_lower,daily_positivity_upper\n"
+        "BAD,Bad Lab,NA,NA,2026-05-01,2026-05-01,1,3,1,3,notanumber,0.1,0.5\n"
+    )
+    (tmp_path / "lab_positivity_aggregated.csv").write_text(csv_text, encoding="utf-8")
+
+    labs, lab_x = ds._pack_trends_labs(tmp_path / "lab_positivity_aggregated.csv")
+
+    assert labs == []
+    assert lab_x is None
