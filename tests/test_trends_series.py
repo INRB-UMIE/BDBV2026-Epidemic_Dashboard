@@ -114,3 +114,106 @@ def test_blank_and_na_locations_are_dropped(tmp_path):
 
     assert sorted(out["province"]) == ["Ituri"]   # not "NA", not ""
     assert out["healthzone"] == {}                # whitespace-only dropped
+
+
+# --- Deaths packer ----------------------------------------------------------
+
+DEATHS_CSV = (
+    "country,reporting_date,daily_deaths,cumulative_deaths,spatial_scale,province,health_zone\n"
+    "DRC,2026-05-01,1,1,national,NA,NA\n"
+    # 05-02 and 05-03 absent -- daily must be 0 and cumulative CARRIED FORWARD at 1
+    "DRC,2026-05-04,2,3,national,NA,NA\n"
+    # duplicate date: last row WINS (not summed) -- unlike cases
+    "DRC,2026-05-04,9,4,national,NA,NA\n"
+    "DRC,2026-05-01,0,0,healthzone,NA,Rwampara\n"   # all-zero location is KEPT
+)
+
+
+def test_deaths_forward_fills_overwrites_duplicates_and_keeps_zero_locations(tmp_path):
+    (tmp_path / "cumulative_positive_deaths.csv").write_text(DEATHS_CSV, encoding="utf-8")
+
+    out = ds._pack_trends_deaths(tmp_path / "cumulative_positive_deaths.csv", canon=lambda s: s)
+
+    nat = out["national"]["national"]
+    assert nat["start"] == "2026-05-01"
+    assert nat["cum"] == [1, 1, 1, 4]     # carried forward across the gap; duplicate overwrote 3 -> 4
+    assert nat["daily"] == [1, 0, 0, 9]   # gap days are 0; duplicate overwrote 2 -> 9
+    # deaths have NO zero-total skip (that rule is cases-only, spec 6.1/6.3)
+    assert out["healthzone"]["Rwampara"] == {"start": "2026-05-01", "cum": [0], "daily": [0]}
+
+
+def test_deaths_duplicate_date_overwrites_not_accumulates(tmp_path):
+    # If the last-row-wins overwrite were changed to accumulate (like cases),
+    # this single-day series would read cum=7, daily=7 instead of 4/4.
+    csv_text = (
+        "reporting_date,daily_deaths,cumulative_deaths,spatial_scale,province,health_zone\n"
+        "2026-05-01,3,3,national,NA,NA\n"
+        "2026-05-01,4,4,national,NA,NA\n"
+    )
+    (tmp_path / "cumulative_positive_deaths.csv").write_text(csv_text, encoding="utf-8")
+
+    out = ds._pack_trends_deaths(tmp_path / "cumulative_positive_deaths.csv")
+
+    assert out["national"]["national"] == {"start": "2026-05-01", "cum": [4], "daily": [4]}
+
+
+def test_deaths_gap_carries_forward_not_zero_or_interpolated(tmp_path):
+    # Across a multi-day gap, cum must repeat the LAST observed value on every
+    # gap day -- not reset to 0 and not interpolate toward the next value.
+    csv_text = (
+        "reporting_date,daily_deaths,cumulative_deaths,spatial_scale,province,health_zone\n"
+        "2026-05-01,5,5,national,NA,NA\n"
+        # 05-02..05-04 absent
+        "2026-05-05,1,20,national,NA,NA\n"
+    )
+    (tmp_path / "cumulative_positive_deaths.csv").write_text(csv_text, encoding="utf-8")
+
+    out = ds._pack_trends_deaths(tmp_path / "cumulative_positive_deaths.csv")
+
+    nat = out["national"]["national"]
+    assert nat["cum"] == [5, 5, 5, 5, 20]     # carried forward at 5, not 0 and not interpolated
+    assert nat["daily"] == [5, 0, 0, 0, 1]
+
+
+def test_deaths_no_epoch_or_leading_trim(tmp_path):
+    # Cases restrict `start` to the first positive date >= 2026-01-01 (or fall
+    # back to the earliest positive when none qualifies). Deaths must NOT
+    # inherit that rule at all: a row dated 2025-12-31 stays as `start`
+    # verbatim even though a later, in-epoch positive (2026-01-01) exists --
+    # if the epoch rule were wrongly applied here, `start` would jump to
+    # 2026-01-01 instead. No trimming of leading zero-days either.
+    csv_text = (
+        "reporting_date,daily_deaths,cumulative_deaths,spatial_scale,province,health_zone\n"
+        "2025-12-30,0,0,national,NA,NA\n"
+        "2025-12-31,2,2,national,NA,NA\n"
+        "2026-01-01,3,5,national,NA,NA\n"
+    )
+    (tmp_path / "cumulative_positive_deaths.csv").write_text(csv_text, encoding="utf-8")
+
+    out = ds._pack_trends_deaths(tmp_path / "cumulative_positive_deaths.csv")
+
+    assert out["national"]["national"] == {
+        "start": "2025-12-30",
+        "cum": [0, 2, 5],
+        "daily": [0, 2, 3],
+    }
+
+
+def test_deaths_blank_counts_are_read_as_zero(tmp_path):
+    # Mirrors _i0 behaviour already proven for cases: blank/non-numeric count
+    # columns must read as 0, not raise or corrupt the packed series.
+    csv_text = (
+        "reporting_date,daily_deaths,cumulative_deaths,spatial_scale,province,health_zone\n"
+        "2026-05-01,1,1,national,NA,NA\n"
+        "2026-05-02,,,national,NA,NA\n"
+        "2026-05-03,notanumber,notanumber,national,NA,NA\n"
+    )
+    (tmp_path / "cumulative_positive_deaths.csv").write_text(csv_text, encoding="utf-8")
+
+    out = ds._pack_trends_deaths(tmp_path / "cumulative_positive_deaths.csv")
+
+    assert out["national"]["national"] == {
+        "start": "2026-05-01",
+        "cum": [1, 0, 0],
+        "daily": [1, 0, 0],
+    }

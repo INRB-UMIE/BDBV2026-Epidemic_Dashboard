@@ -4368,6 +4368,51 @@ def _pack_trends_cases(path, canon=None):
     return packed
 
 
+def _pack_trends_deaths(path, canon=None):
+    """{scale: {location: {start, cum[], daily[]}}} from cumulative_positive_deaths.csv.
+
+    `daily` is carried in the payload because the chart draws a point ONLY on
+    days where daily_deaths > 0 (spec 6.3); it is not otherwise plotted.
+    """
+    canon = canon or (lambda s: s)
+    buckets = {scale: {} for scale, _ in _TRENDS_SCALES}
+    with open(path, newline="", encoding="utf-8") as fh:
+        for row in csv.DictReader(fh):
+            scale = (row.get("spatial_scale") or "").strip().lower()
+            key_field = dict(_TRENDS_SCALES).get(scale, "__missing__")
+            if key_field == "__missing__":
+                continue
+            loc = _trends_loc(row, key_field)
+            if loc is None:
+                continue
+            if key_field is not None:
+                loc = canon(loc)
+            day = (row.get("reporting_date") or "").strip()
+            if not _ONSET_DATE_RE.match(day):
+                continue
+            # OVERWRITE, last row wins -- deliberately unlike _pack_trends_cases
+            buckets[scale].setdefault(loc, {})[day] = (
+                _i0(row.get("daily_deaths")), _i0(row.get("cumulative_deaths"))
+            )
+
+    packed = {scale: {} for scale, _ in _TRENDS_SCALES}
+    for scale, by_loc in buckets.items():
+        for loc, by_day in by_loc.items():
+            if not by_day:
+                continue                       # no zero-total skip: only "no rows at all"
+            days = _day_range(min(by_day), max(by_day))
+            cum, daily, last = [], [], 0
+            for d in days:
+                if d in by_day:
+                    daily.append(by_day[d][0])
+                    last = by_day[d][1]
+                else:
+                    daily.append(0)
+                cum.append(last)               # carry forward
+            packed[scale][loc] = {"start": days[0], "cum": cum, "daily": daily}
+    return packed
+
+
 def _onset_manifest_dated_dir(base: Path):
     """The dated ``outputs/<date>/`` dir the onset SVGs are read from.
 
