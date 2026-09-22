@@ -132,6 +132,13 @@ def _write_shared_assets(assets_dir) -> tuple[int, int]:
     genomic_js = (SCRIPT_DIR / "assets" / "genomic.js").read_text(encoding="utf-8")
     (assets_dir / "genomic.js").write_text(genomic_js, encoding="utf-8")
 
+    # Shared chart primitives (charts.js) + the Trends page script. charts.js is
+    # written unconditionally alongside engine.js; trends.js is referenced only
+    # by trends.html.
+    for name in ("charts.js", "trends.js"):
+        (assets_dir / name).write_text(
+            (SCRIPT_DIR / "assets" / name).read_text(encoding="utf-8"), encoding="utf-8")
+
     # Vendored PearTree phylogeny renderer (~1.5 MB, genomic-page-only; the tag
     # is emitted only on genomic-epidemiology.html). Copied byte-for-byte -- it's
     # a pre-built minified bundle, not source we edit here.
