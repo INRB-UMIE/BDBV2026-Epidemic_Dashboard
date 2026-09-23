@@ -239,7 +239,11 @@
       if (!r.width) { tip.style.display = "none"; return; }
       var mx = (ev.clientX - r.left) * (svg.viewBox.baseVal.width / r.width);
       if (mx < fr.left || mx > fr.right) { tip.style.display = "none"; return; }
-      var iso = new Date(fr.pxToDate(mx)).toISOString().slice(0, 10);
+      // Snap to the NEAREST day, not the one we happen to be past. Marks are
+      // CENTRED on their date -- a bar spans half a day either side of it -- so
+      // flooring attributes the left half of every bar to the previous day.
+      var ms = fr.pxToDate(mx);
+      var iso = new Date(Math.round(ms / 86400000) * 86400000).toISOString().slice(0, 10);
       var html = resolve(iso);
       if (!html) { tip.style.display = "none"; return; }
       tip.innerHTML = html;
