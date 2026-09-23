@@ -21,7 +21,9 @@ _HEIGHT_MEDIAN_RE = re.compile(r"height_median=([0-9.eE+-]+)")
 _ISO_DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 _YM_DATE_RE = re.compile(r"^\d{4}-\d{2}$")
 
-# Prefer the EGC tree in each dated drop (matches the dashboard's historical default).
+# Prefer EGC trees when present; otherwise SG / hipstrCA / any .tree.
+# Dated BEAST drops (outputs/beast/<date>/) increasingly ship the display tree
+# alongside Ne curves, so callers may pass both PHYLOGENIES_DIR and BEAST_NE_DIR.
 _TREE_GLOBS = (
     "*GTR_EGC*.hipstr.tree",
     "*EGC*.hipstr.tree",
@@ -29,27 +31,47 @@ _TREE_GLOBS = (
     "*EGC*.HIPSTR.tree",
     "*GTR_EGC*.tree",
     "*EGC*.tree",
+    "*SG*.hipstrCA.tree",
+    "*SG*.hipstr.tree",
+    "*hipstrCA.tree",
+    "*.hipstr.tree",
+    "*.HIPSTR.tree",
     "*.tree",
 )
 
 
-def resolve_latest_phylogeny_tree(phylogenies_dir: Path) -> Path | None:
-    """Return the preferred ``.tree`` file from the newest ``YYYY-MM-DD`` folder."""
-    base = Path(phylogenies_dir)
-    if not base.is_dir():
-        return None
-    dated = sorted(
-        p for p in base.iterdir()
-        if p.is_dir() and _DATE_DIR_RE.match(p.name)
-    )
-    if not dated:
-        return None
-    latest = dated[-1]
+def _preferred_tree_in(folder: Path) -> Path | None:
     for pattern in _TREE_GLOBS:
-        matches = sorted(latest.glob(pattern))
+        matches = sorted(folder.glob(pattern))
         if matches:
             return matches[0]
     return None
+
+
+def resolve_latest_phylogeny_tree(*dirs: Path) -> Path | None:
+    """Return the preferred ``.tree`` from the newest ``YYYY-MM-DD`` folder.
+
+    Searches each directory root independently (typically ``data/phylogenies``
+    and ``outputs/beast``). Folder *names* decide recency — the newest date
+    that contains a usable tree wins, regardless of which root it lives under.
+    """
+    candidates: list[tuple[str, Path]] = []
+    for raw in dirs:
+        if raw is None:
+            continue
+        base = Path(raw)
+        if not base.is_dir():
+            continue
+        for folder in base.iterdir():
+            if not (folder.is_dir() and _DATE_DIR_RE.match(folder.name)):
+                continue
+            tree = _preferred_tree_in(folder)
+            if tree is not None:
+                candidates.append((folder.name, tree))
+    if not candidates:
+        return None
+    candidates.sort(key=lambda item: item[0])
+    return candidates[-1][1]
 
 
 def _parse_fasta_header(name: str) -> tuple[str, str, str]:

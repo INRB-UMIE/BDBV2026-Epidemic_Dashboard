@@ -62,8 +62,10 @@ GENOMIC_DIR = Path(
     os.environ.get("GENOMIC_DIR") or
     (SCRIPT_DIR.parent.parent / "BDBV2026-Genomic_Epi" / "public" / "data")
 ).resolve()
-# Latest HIPSTR/BEAST trees from BDBV2026-Phylogenetic_Analyses (dated subfolders).
-# Override with PHYLOGENIES_DIR. Ne curves come from BEAST_NE_DIR (same sibling repo);
+# Dated HIPSTR/BEAST tree drops from BDBV2026-Phylogenetic_Analyses
+# (data/phylogenies/<date>/). Override with PHYLOGENIES_DIR. The genomic loader
+# also considers trees under BEAST_NE_DIR and picks the newest folder name.
+# Ne curves come from BEAST_NE_DIR (same sibling repo);
 # GENOMIC_DIR remains a fallback for legacy Genomic_Epi products only.
 PHYLOGENIES_DIR = Path(
     os.environ.get("PHYLOGENIES_DIR") or

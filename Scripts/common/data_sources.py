@@ -4176,8 +4176,10 @@ def _attach_ne_products(products: dict, genomic_dir: Path, beast_dir: Path | Non
 def load_genomic_products(genomic_dir=None, phylogenies_dir=None, beast_ne_dir=None):
     """Load genomic-tab products into a payload slice.
 
-    Tree/tips/meta come from the latest ``.tree`` under ``PHYLOGENIES_DIR``.
-    SkyGrid / exponential Ne curves come from the latest dated folder under
+    Tree/tips/meta come from the newest dated ``YYYY-MM-DD`` folder that
+    contains a ``.tree``, searching ``PHYLOGENIES_DIR`` and ``BEAST_NE_DIR``
+    (BEAST drops may ship the display tree next to Ne curves). SkyGrid /
+    exponential Ne curves come from the latest dated folder under
     ``BEAST_NE_DIR`` (converted from Tracer ``*.ne.txt`` / legacy skygrid TSV).
     When the phylogeny folder is newer than the Ne folder, the latest Ne is
     still used and ``ne_stale`` is set for the UI (translated client-side).
@@ -4186,9 +4188,9 @@ def load_genomic_products(genomic_dir=None, phylogenies_dir=None, beast_ne_dir=N
     Returns {} when neither source is present (build stays green).
     """
     phylo_base = Path(phylogenies_dir) if phylogenies_dir is not None else PHYLOGENIES_DIR
-    phylo_path = resolve_latest_phylogeny_tree(phylo_base)
     d = Path(genomic_dir) if genomic_dir is not None else GENOMIC_DIR
     beast = Path(beast_ne_dir) if beast_ne_dir is not None else BEAST_NE_DIR
+    phylo_path = resolve_latest_phylogeny_tree(phylo_base, beast)
     if phylo_path is not None:
         products = prepare_phylo_tree_products(phylo_path)
         if products:

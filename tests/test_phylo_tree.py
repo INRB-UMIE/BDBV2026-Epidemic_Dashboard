@@ -62,3 +62,50 @@ def test_load_genomic_products_uses_phylo_tree(tmp_path, monkeypatch):
     assert out["tips"][0]["id"] == "PP_006XHKB.2"
     # No BEAST Ne; Genomic_Epi tipCount matches → sidecars attached
     assert out["skygrid"]["points"][0]["neMedian"] == 1
+
+
+def test_resolve_latest_phylogeny_tree_prefers_newer_beast_folder(tmp_path):
+    """Newest dated folder wins even when the tree lives under outputs/beast."""
+    phy = tmp_path / "phylogenies"
+    beast = tmp_path / "beast"
+    _write_raw_tree(phy, "2026-08-13", "Ituri2026.GTR_EGC.hipstr.tree", "#NEXUS\n")
+    _write_raw_tree(
+        beast, "2026-09-01",
+        "Ituri2026.DRC_trimmed.ADAR_masked.final.SG.aln.hipstrCA.tree",
+        "#NEXUS\n",
+    )
+    path = phylo.resolve_latest_phylogeny_tree(phy, beast)
+    assert path.parent.name == "2026-09-01"
+    assert path.name.endswith("hipstrCA.tree")
+
+
+def test_load_genomic_products_uses_newer_beast_tree_and_ne(tmp_path, monkeypatch):
+    phylo_dir = tmp_path / "phy"
+    beast_dir = tmp_path / "beast"
+    nexus_old = (
+        "#NEXUS\nBegin trees;\n"
+        "tree TREE1 = [&R] ('26FHV045|PP_006XHKB.2|DRC|Ituri|Bunia|2026-05-03':0.1);\nEnd;\n"
+    )
+    nexus_new = (
+        "#NEXUS\nBegin trees;\n"
+        "tree TREE1 = [&R] ('26FHV999|PP_NEWTIP.1|DRC|Ituri|Mongbwalu|2026-08-01':0.1);\nEnd;\n"
+    )
+    _write_raw_tree(phylo_dir, "2026-08-13", "Ituri.GTR_EGC.hipstr.tree", nexus_old)
+    drop = beast_dir / "2026-09-01"
+    drop.mkdir(parents=True)
+    (drop / "Ituri.final.SG.aln.hipstrCA.tree").write_text(nexus_new, encoding="utf-8")
+    # Minimal SkyGrid Ne in the same newest folder
+    (drop / "Ituri.final.SG.aln.ne.txt").write_text(
+        "\tBayesian SkyGrid: Ituri.SG.log\t\t\t\n"
+        "time\tdate\tdatetime\tmilliseconds\tmean\tmedian\tupper\tlower\n"
+        "2026.5\t2026-08-01\t2026-08-01T00:00:00\t0\t2\t2\t4\t1\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(ds, "PHYLOGENIES_DIR", phylo_dir)
+    monkeypatch.setattr(ds, "BEAST_NE_DIR", beast_dir)
+    monkeypatch.setattr(ds, "GENOMIC_DIR", tmp_path / "missing-gen")
+    out = ds.load_genomic_products()
+    assert out["tips"][0]["id"] == "PP_NEWTIP.1"
+    assert out["meta"]["updated"] == "2026-09-01"
+    assert out["skygrid"]["points"][0]["neMedian"] == 2
+    assert out.get("ne_stale") is not True

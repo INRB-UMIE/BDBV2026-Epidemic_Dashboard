@@ -55,10 +55,9 @@ def test_load_beast_ne_products_sg_and_egc(tmp_path):
     assert out["exponential"]["points"][-1]["neUpper"] == 50.0
 
 
-def test_ne_stale_note_when_tree_newer():
-    note = beast.ne_stale_relative_to_tree("2026-08-01", "2026-08-13")
-    assert note and "do not correspond" in note
-    assert beast.ne_stale_relative_to_tree("2026-08-17", "2026-08-13") is None
+def test_ne_stale_when_tree_newer():
+    assert beast.ne_stale_relative_to_tree("2026-08-01", "2026-08-13") is True
+    assert beast.ne_stale_relative_to_tree("2026-08-17", "2026-08-13") is False
 
 
 def test_load_genomic_products_uses_beast_ne(tmp_path, monkeypatch):
@@ -83,4 +82,4 @@ def test_load_genomic_products_uses_beast_ne(tmp_path, monkeypatch):
     monkeypatch.setattr(ds, "GENOMIC_DIR", tmp_path / "missing-gen")
     out = ds.load_genomic_products()
     assert out["skygrid"]["points"][0]["neMedian"] == 2
-    assert out.get("ne_stale_note")  # tree folder 2026-08-20 > Ne 2026-08-10
+    assert out.get("ne_stale") is True  # tree folder 2026-08-20 > Ne 2026-08-10
