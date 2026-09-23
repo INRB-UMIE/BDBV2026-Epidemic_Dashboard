@@ -814,6 +814,15 @@
   var CORR_PAD = { left: 48, right: 14, top: 14, bottom: 32 };
   var CORR_PT = "#5a6a7a", CORR_SEL = "#f2c84b";
   var CORR_LOG_FLOOR = 0.5;   // maps zeros onto the log axes without dropping points
+  var CORR_R_MIN = 2.5, CORR_R_MAX = 11;   // radius encodes genomes/cases fraction (area ∝ frac)
+
+  // Marker radius from sequencing fraction; area scales with coverage so small
+  // fractions stay readable. Null coverage (no cases) uses the minimum size.
+  function corrRadius(coverage, selected) {
+    var frac = coverage == null ? 0 : Math.min(1, Math.max(0, coverage));
+    var r = CORR_R_MIN + (CORR_R_MAX - CORR_R_MIN) * Math.sqrt(frac);
+    return selected ? r + 1.5 : r;
+  }
 
   // Scatter: confirmed cases vs genomes per health zone (raw or log–log).
   // Clicking a point selects that health zone on the map + phylogeny (via coordinator).
@@ -876,13 +885,13 @@
 
     function hitRow(mx, my) {
       if (!layout) return null;
-      var best = null, bd = Infinity;
+      var best = null, bd = Infinity, hitR = 0;
       rows.forEach(function (r) {
         var dx = layout.xToPx(axisVal(r.cases)) - mx, dy = layout.yToPx(axisVal(r.genomes)) - my;
         var dd = Math.sqrt(dx * dx + dy * dy);
-        if (dd < bd) { bd = dd; best = r; }
+        if (dd < bd) { bd = dd; best = r; hitR = corrRadius(r.coverage, false); }
       });
-      return (best && bd <= 12) ? best : null;
+      return (best && bd <= Math.max(hitR + 2, 10)) ? best : null;
     }
 
     function render() {
@@ -987,16 +996,22 @@
         }
       }
 
-      rows.forEach(function (r) {
+      // Draw smaller (low-coverage) markers last so larger ones don't fully hide them;
+      // sort ascending coverage for painter's order, then draw selected on top.
+      var drawOrder = rows.slice().sort(function (a, b) {
+        return (a.coverage || 0) - (b.coverage || 0);
+      });
+      drawOrder.forEach(function (r) {
         var cx = xToPx(axisVal(r.cases)), cy = yToPx(axisVal(r.genomes));
         var selected = selectedUpper && up(r.zone) === selectedUpper;
+        if (selected) return;   // selected drawn after the loop
         var circle = svgEl("circle", {
           cx: cx, cy: cy,
-          r: selected ? 7 : 4,
-          fill: selected ? CORR_SEL : CORR_PT,
-          opacity: selected ? 1 : 0.8,
-          stroke: selected ? "#9a7a16" : "none",
-          "stroke-width": selected ? 1.5 : 0,
+          r: corrRadius(r.coverage, false),
+          fill: CORR_PT,
+          opacity: 0.8,
+          stroke: "none",
+          "stroke-width": 0,
           "data-zone": r.zone,
           style: "cursor:pointer"
         });
@@ -1005,17 +1020,35 @@
           if (zoneClickCb) zoneClickCb(r.zone);
         });
         svg.appendChild(circle);
-        if (selected) {
-          var lab = svgEl("text", {
-            x: cx + 6, y: cy - 4, "font-size": 8,
-            fill: "#9a7a16", style: "pointer-events:none"
-          });
-          lab.textContent = r.zone; svg.appendChild(lab);
-        }
+      });
+      rows.forEach(function (r) {
+        if (!(selectedUpper && up(r.zone) === selectedUpper)) return;
+        var cx = xToPx(axisVal(r.cases)), cy = yToPx(axisVal(r.genomes));
+        var circle = svgEl("circle", {
+          cx: cx, cy: cy,
+          r: corrRadius(r.coverage, true),
+          fill: CORR_SEL,
+          opacity: 1,
+          stroke: "#9a7a16",
+          "stroke-width": 1.5,
+          "data-zone": r.zone,
+          style: "cursor:pointer"
+        });
+        circle.addEventListener("click", function (ev) {
+          ev.stopPropagation();
+          if (zoneClickCb) zoneClickCb(r.zone);
+        });
+        svg.appendChild(circle);
+        var lab = svgEl("text", {
+          x: cx + corrRadius(r.coverage, true) + 3, y: cy - 4, "font-size": 8,
+          fill: "#9a7a16", style: "pointer-events:none"
+        });
+        lab.textContent = r.zone; svg.appendChild(lab);
       });
 
       var legend = svgEl("text", { x: W - CORR_PAD.right, y: CORR_PAD.top + 8, "font-size": 8, fill: "#9c968b", "text-anchor": "end" });
-      legend.textContent = (typeof t === "function" ? t("ui.genomic.click_to_select") : null) || "click a point to select";
+      legend.textContent = (typeof t === "function" ? t("ui.genomic.corr_size_legend") : null)
+        || "size ∝ % sequenced · click to select";
       svg.appendChild(legend);
 
       host.appendChild(svg); host.appendChild(tip);

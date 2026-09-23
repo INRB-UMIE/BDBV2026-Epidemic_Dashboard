@@ -45,9 +45,10 @@ def test_genomic_module_contributes_rail_and_script():
     assert 'id="gen-ne-stale-note"' in html
     assert 'id="gen-dist-imputed"' in html and 'id="gen-dist-beyond"' in html   # distribution controls
     assert 'id="gen-corr-raw"' in html and 'id="gen-corr-log"' in html         # raw / log–log toggle
-    # Cases/genomes card must appear before the Ne card in the rail markup.
-    assert html.index('id="gen-dist-card"') < html.index('id="gen-ne-card"')
-    assert html.index('id="gen-corr-card"') < html.index('id="gen-ne-card"')
+    # Rail order: tree → Ne → cases/genomes → correlation.
+    assert html.index('id="gen-tree-card"') < html.index('id="gen-ne-card"')
+    assert html.index('id="gen-ne-card"') < html.index('id="gen-dist-card"')
+    assert html.index('id="gen-dist-card"') < html.index('id="gen-corr-card"')
     assert 'gen-dist-csv' not in html                                          # data is not downloadable
     assert 'src="assets/genomic.js"' in html
     assert "stub-genomic-epidemiology" not in html

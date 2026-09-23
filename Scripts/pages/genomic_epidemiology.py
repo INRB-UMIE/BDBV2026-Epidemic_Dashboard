@@ -21,7 +21,7 @@ VIEW_ID = "genomic-epidemiology"
 # page (Leaflet, html2canvas) is unaffected. Proven in the Phase 0 spike.
 _HEAD = r"""<meta http-equiv="Content-Security-Policy" content="font-src 'self' data:;" />"""
 
-# Right-rail order: phylogeny → cases/genomes → correlation → Ne.
+# Right-rail order: phylogeny → Ne → cases/genomes → correlation.
 # genomic.js fills the .gen-body divs from PAYLOAD.genomic.
 _BODY = r"""<div id="genomic-panel">
   <div id="genomic-resize" role="separator" aria-orientation="vertical" data-i18n-title="ui.aria.genomic_resize" data-i18n-aria="ui.aria.genomic_resize" title="Drag to resize" tabindex="0"></div>
@@ -43,6 +43,17 @@ _BODY = r"""<div id="genomic-panel">
       <div class="gen-body gen-tree-body" id="gen-tree-body" data-i18n="ui.genomic.loading">Loading…</div>
       <div class="gen-tree-legend-box" id="gen-tree-legend-box" hidden></div>
     </div>
+  </section>
+  <section class="gen-card" id="gen-ne-card">
+    <div class="gen-card-head">
+      <span class="gen-title" tabindex="0">
+        <h2 data-i18n="ui.genomic.ne_title">Effective population size</h2>
+        <span class="gen-info" aria-hidden="true">i</span>
+        <span class="gen-tip" role="tooltip" data-i18n="ui.genomic.ne_tip">Estimated effective population size (Nₑ) of the outbreak through time (up to the latest sample in the phylogeny). A rising curve indicates a growing epidemic; a plateau or decline indicates slowing transmission. Shaded regions represent the 95% credible intervals.</span>
+      </span>
+    </div>
+    <div class="gen-body gen-chart" id="gen-ne-body"></div>
+    <p class="gen-ne-stale-note" id="gen-ne-stale-note" data-i18n="ui.genomic.ne_stale_note" hidden></p>
   </section>
   <section class="gen-card" id="gen-dist-card">
     <div class="gen-card-head">
@@ -69,7 +80,7 @@ _BODY = r"""<div id="genomic-panel">
       <span class="gen-title" tabindex="0">
         <h2 data-i18n="ui.genomic.corr_title">Cases vs sequenced genomes</h2>
         <span class="gen-info" aria-hidden="true">i</span>
-        <span class="gen-tip" role="tooltip" data-i18n="ui.genomic.corr_tip">Each point is a health zone: total confirmed cases from the rolling-positivity table versus genomes in the phylogeny. Zones well below the proportional reference line have disproportionately few sequences relative to their case burden. Toggle Raw for linear counts or Log–log to compare zones across orders of magnitude.</span>
+        <span class="gen-tip" role="tooltip" data-i18n="ui.genomic.corr_tip">Each point is a health zone: total confirmed cases from the rolling-positivity table versus genomes in the phylogeny. Marker size scales with the fraction of cases sequenced (genomes / cases). Zones well below the proportional reference line have disproportionately few sequences relative to their case burden. Toggle Raw for linear counts or Log–log to compare zones across orders of magnitude.</span>
       </span>
       <span class="gen-toggles">
         <button type="button" id="gen-corr-raw" class="gen-toggle" aria-pressed="true" data-i18n="ui.genomic.corr_raw" data-i18n-title="ui.genomic.corr_raw_title" title="Plot raw case and genome counts">Raw</button>
@@ -77,17 +88,6 @@ _BODY = r"""<div id="genomic-panel">
       </span>
     </div>
     <div class="gen-body gen-chart gen-corr-chart" id="gen-corr-body"></div>
-  </section>
-  <section class="gen-card" id="gen-ne-card">
-    <div class="gen-card-head">
-      <span class="gen-title" tabindex="0">
-        <h2 data-i18n="ui.genomic.ne_title">Effective population size</h2>
-        <span class="gen-info" aria-hidden="true">i</span>
-        <span class="gen-tip" role="tooltip" data-i18n="ui.genomic.ne_tip">Estimated effective population size (Nₑ) of the outbreak through time (up to the latest sample in the phylogeny). A rising curve indicates a growing epidemic; a plateau or decline indicates slowing transmission. Shaded regions represent the 95% credible intervals.</span>
-      </span>
-    </div>
-    <div class="gen-body gen-chart" id="gen-ne-body"></div>
-    <p class="gen-ne-stale-note" id="gen-ne-stale-note" data-i18n="ui.genomic.ne_stale_note" hidden></p>
   </section>
 </div>"""
 
