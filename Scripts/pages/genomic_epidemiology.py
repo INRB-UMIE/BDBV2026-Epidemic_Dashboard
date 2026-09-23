@@ -83,8 +83,8 @@ _BODY = r"""<div id="genomic-panel">
         <span class="gen-tip" role="tooltip" data-i18n="ui.genomic.corr_tip">Each point is a health zone: total confirmed cases from the rolling-positivity table versus genomes in the phylogeny. Marker size scales with the fraction of cases sequenced (genomes / cases). Zones well below the proportional reference line have disproportionately few sequences relative to their case burden. Toggle Raw for linear counts or Log–log to compare zones across orders of magnitude.</span>
       </span>
       <span class="gen-toggles">
-        <button type="button" id="gen-corr-raw" class="gen-toggle" aria-pressed="true" data-i18n="ui.genomic.corr_raw" data-i18n-title="ui.genomic.corr_raw_title" title="Plot raw case and genome counts">Raw</button>
-        <button type="button" id="gen-corr-log" class="gen-toggle" aria-pressed="false" data-i18n="ui.genomic.corr_log" data-i18n-title="ui.genomic.corr_log_title" title="Plot log–log transformed counts">Log–log</button>
+        <button type="button" id="gen-corr-raw" class="gen-toggle" aria-pressed="false" data-i18n="ui.genomic.corr_raw" data-i18n-title="ui.genomic.corr_raw_title" title="Plot raw case and genome counts">Raw</button>
+        <button type="button" id="gen-corr-log" class="gen-toggle" aria-pressed="true" data-i18n="ui.genomic.corr_log" data-i18n-title="ui.genomic.corr_log_title" title="Plot log–log transformed counts">Log–log</button>
       </span>
     </div>
     <div class="gen-body gen-chart gen-corr-chart" id="gen-corr-body"></div>
