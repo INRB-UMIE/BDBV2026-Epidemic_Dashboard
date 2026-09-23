@@ -42,6 +42,7 @@ from common.paths import (
     METHODS_DOCX, METHODS_DOCX_FR, METHODS_HTML_FR, TERMS_TXT, TERMS_TXT_FR,
     BRANDING_DIR, BRANDING_URLS, THEME_CSS, LOCALES_DIR, SUPPORTED_LANGS,
     OUTPUT_DIR, GENOMIC_DIR, PHYLOGENIES_DIR, BEAST_NE_DIR,
+    ROLLING_POSITIVITY_CSV,
 )
 from common.phylo_tree import prepare_phylo_tree_products, resolve_latest_phylogeny_tree
 from common.beast_ne import load_beast_ne_products, ne_stale_relative_to_tree
@@ -234,6 +235,7 @@ __all__ = [
     'load_genomic_products',
     'canonicalize_genomic_zones',
     'load_onset_imputed_series',
+    'load_rolling_positivity_case_series',
 ]
 
 # ---------------------------------------------------------------------------
@@ -4316,5 +4318,76 @@ def load_onset_imputed_series(outputs_dir=None, known_noms=None, tree_most_recen
         "beyond_tree_from": tree_most_recent,
         "source": path.parent.name,
     }
+
+
+def load_rolling_positivity_case_series(
+    csv_path=None, known_noms=None, tree_most_recent=None,
+):
+    """Build genomic ``onset_distribution``-shaped case counts from rolling positivity.
+
+    Reads ``confirmed_case`` from BDBV2026-Phylogenetic_Analyses
+    ``data/rolling_positivity.csv`` (health-zone and national rows). Counts are
+    stored under ``observed`` with ``imputed`` always 0 so the existing genomic
+    time-series and cases-vs-genomes charts keep working without an imputed split.
+
+    Returns {} when the CSV is missing.
+    """
+    path = Path(csv_path) if csv_path is not None else ROLLING_POSITIVITY_CSV
+    if not path.is_file():
+        return {}
+    nom_by_norm = {_norm(n): n for n in (known_noms or ())}
+
+    def canon(name: str) -> str:
+        name = (name or "").strip()
+        if not name or name.upper() == "NA":
+            return name
+        return nom_by_norm.get(_norm(name), name)
+
+    by_zone: dict = {}
+    national: dict = {}
+    with open(path, newline="", encoding="utf-8") as fh:
+        for row in csv.DictReader(fh):
+            scale = (row.get("spatial_scale") or "").strip().lower()
+            d = (row.get("date_of_symptom_onset_imputed") or "").strip()
+            if not _ONSET_DATE_RE.match(d):
+                continue
+            try:
+                n = int(float(row.get("confirmed_case") or 0))
+            except (TypeError, ValueError):
+                continue
+            if n < 0:
+                continue
+            if scale == "healthzone":
+                z = canon(row.get("health_zone") or "")
+                if not z or z.upper() == "NA":
+                    continue
+                bucket = by_zone.setdefault(z, {}).setdefault(
+                    d, {"observed": 0, "imputed": 0},
+                )
+                bucket["observed"] += n
+            elif scale == "national":
+                bucket = national.setdefault(d, {"observed": 0, "imputed": 0})
+                bucket["observed"] += n
+
+    # If national rows are absent, fall back to summing health-zone counts.
+    if not national and by_zone:
+        for series in by_zone.values():
+            for d, counts in series.items():
+                bucket = national.setdefault(d, {"observed": 0, "imputed": 0})
+                bucket["observed"] += counts.get("observed", 0)
+
+    if not national and not by_zone:
+        return {}
+    return {
+        "dates": sorted(national) if national else sorted({
+            d for series in by_zone.values() for d in series
+        }),
+        "national": national,
+        "by_zone": by_zone,
+        "beyond_tree_from": tree_most_recent,
+        "source": "rolling_positivity",
+        "case_source": "rolling_positivity.confirmed_case",
+    }
+
 
 

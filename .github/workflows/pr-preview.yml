@@ -153,6 +153,7 @@ jobs:
           GENOMIC_DIR: ${{ github.workspace }}/BDBV2026-Genomic_Epi/public/data
           PHYLOGENIES_DIR: ${{ github.workspace }}/BDBV2026-Phylogenetic_Analyses/data/phylogenies
           BEAST_NE_DIR: ${{ github.workspace }}/BDBV2026-Phylogenetic_Analyses/outputs/beast
+          ROLLING_POSITIVITY_CSV: ${{ github.workspace }}/BDBV2026-Phylogenetic_Analyses/data/rolling_positivity.csv
           # Substituted into assets/engine.js so CARTO's raster tiles come back
           # unwatermarked. A public client-side key, held as a secret only so it
           # sits in one rotatable place; forks get an empty value and build a

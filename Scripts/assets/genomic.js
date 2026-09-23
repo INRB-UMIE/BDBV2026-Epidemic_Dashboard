@@ -343,13 +343,13 @@
         noteEl.hidden = true;
       }
     }
-    var sg = genomic.skygrid, ex = genomic.exponential;
-    if (!sg && !ex) { host.textContent = "No Ne data"; return; }
-    var meta = sg || ex;
+    var sg = genomic.skygrid;
+    if (!sg) { host.textContent = "No Ne data"; return; }
+    var meta = sg;
+    // Ne curve only — no model toggle in the UI.
     var datasets = [
-      sg && { key: "skygrid", label: "SkyGrid", color: "#587e72", band: "rgba(88,126,114,0.15)", btnId: "gen-ne-skygrid", data: sg },
-      ex && { key: "exp", label: "Exp", color: "#7c1d1d", band: "rgba(124,29,29,0.12)", btnId: "gen-ne-exp", data: ex }
-    ].filter(Boolean);
+      { key: "skygrid", label: "SkyGrid", color: "#587e72", band: "rgba(88,126,114,0.15)", data: sg }
+    ];
     datasets.forEach(function (ds) {
       ds.pts = ds.data.points.map(function (p) { return { t: +new Date(p.date), med: p.neMedian, lo: p.neLower, hi: p.neUpper }; });
       ds.visible = true;
@@ -528,7 +528,9 @@
     var beyondFrom = od.beyond_tree_from ? +new Date(od.beyond_tree_from) : Infinity;
     var meta = genomic.meta || {};
     var treeMin = +new Date(meta.rootDate), treeMax = +new Date(meta.mostRecentDate);
-    var showImputed = true, showBeyond = false;
+    // rolling_positivity.confirmed_case has no observed/imputed split.
+    var hasImputedSplit = !(od.case_source || "").includes("rolling_positivity");
+    var showImputed = hasImputedSplit, showBeyond = false;
     var transform = null;
     var markerCounts = [];   // [{t: ms, n: tipCount}] — upper (cases) half only
 
@@ -753,12 +755,16 @@
     }
 
     var impBtn = document.getElementById("gen-dist-imputed");
-    applyToggleStyle(impBtn, showImputed, DIST_IMP, "rgba(88,126,114,0.15)");
-    if (impBtn) impBtn.addEventListener("click", function (e) {
-      e.preventDefault(); showImputed = !showImputed;
+    if (impBtn && !hasImputedSplit) {
+      impBtn.hidden = true;
+    } else {
       applyToggleStyle(impBtn, showImputed, DIST_IMP, "rgba(88,126,114,0.15)");
-      rebuildDays(); render();
-    });
+      if (impBtn) impBtn.addEventListener("click", function (e) {
+        e.preventDefault(); showImputed = !showImputed;
+        applyToggleStyle(impBtn, showImputed, DIST_IMP, "rgba(88,126,114,0.15)");
+        rebuildDays(); render();
+      });
+    }
 
     var beyBtn = document.getElementById("gen-dist-beyond");
     applyToggleStyle(beyBtn, showBeyond, "#9b7d4e", "rgba(155,125,78,0.12)");

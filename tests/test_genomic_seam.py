@@ -40,7 +40,8 @@ def test_genomic_module_contributes_rail_and_script():
     assert 'id="gen-tree-body"' in html and 'id="gen-dist-body"' in html
     assert 'id="gen-corr-body"' in html
     assert 'id="genomic-resize"' in html                      # drag handle present
-    assert 'id="gen-ne-skygrid"' in html and 'id="gen-ne-exp"' in html   # Ne toggles present
+    assert 'id="gen-ne-skygrid"' not in html and 'id="gen-ne-exp"' not in html   # no Ne model toggles
+    assert 'id="gen-ne-body"' in html
     assert 'id="gen-ne-stale-note"' in html
     assert 'id="gen-dist-imputed"' in html and 'id="gen-dist-beyond"' in html   # distribution controls
     # Cases/genomes card must appear before the Ne card in the rail markup.

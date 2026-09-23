@@ -49,7 +49,7 @@ _BODY = r"""<div id="genomic-panel">
       <span class="gen-title" tabindex="0">
         <h2 data-i18n="ui.genomic.dist_title">Confirmed cases &amp; genomes</h2>
         <span class="gen-info" aria-hidden="true">i</span>
-        <span class="gen-tip" role="tooltip" data-i18n="ui.genomic.dist_tip">Daily confirmed positive cases (upward bars) and sequenced genomes from the phylogeny tips (inverted bars), stratified by Mongbwalu, Bunia/Rwampara, and other health zones. The top axis tracks sequencing coverage: genomes as a percentage of confirmed cases on each day.</span>
+        <span class="gen-tip" role="tooltip" data-i18n="ui.genomic.dist_tip">Daily confirmed cases from the phylogenetic analyses rolling-positivity table (upward bars) and sequenced genomes from the phylogeny tips (inverted bars), stratified by Mongbwalu, Bunia/Rwampara, and other health zones. The top axis tracks sequencing coverage: genomes as a percentage of confirmed cases on each day.</span>
       </span>
       <span class="gen-toggles">
         <button type="button" id="gen-dist-imputed" class="gen-toggle" aria-pressed="true" data-i18n="ui.genomic.imputed" data-i18n-title="ui.genomic.imputed_title" title="Show cases with imputed onset dates">Imputed</button>
@@ -69,7 +69,7 @@ _BODY = r"""<div id="genomic-panel">
       <span class="gen-title" tabindex="0">
         <h2 data-i18n="ui.genomic.corr_title">Cases vs sequenced genomes</h2>
         <span class="gen-info" aria-hidden="true">i</span>
-        <span class="gen-tip" role="tooltip" data-i18n="ui.genomic.corr_tip">Each point is a health zone: total confirmed positive cases (onset) versus genomes in the phylogeny. Zones well below the proportional reference line have disproportionately few sequences relative to their case burden.</span>
+        <span class="gen-tip" role="tooltip" data-i18n="ui.genomic.corr_tip">Each point is a health zone: total confirmed cases from the rolling-positivity table versus genomes in the phylogeny. Zones well below the proportional reference line have disproportionately few sequences relative to their case burden.</span>
       </span>
     </div>
     <div class="gen-body gen-chart gen-corr-chart" id="gen-corr-body"></div>
@@ -79,11 +79,7 @@ _BODY = r"""<div id="genomic-panel">
       <span class="gen-title" tabindex="0">
         <h2 data-i18n="ui.genomic.ne_title">Effective population size</h2>
         <span class="gen-info" aria-hidden="true">i</span>
-        <span class="gen-tip" role="tooltip" data-i18n="ui.genomic.ne_tip">Estimated effective population size (Nₑ) of the outbreak through time (up to the latest sample in the phylogeny). A rising curve indicates a growing epidemic; a plateau or decline indicates slowing transmission. SkyGrid is a flexible non-parametric estimate, Exp assumes an exponential-growth model. Shaded regions represent the 95% credible intervals.</span>
-      </span>
-      <span class="gen-toggles">
-        <button type="button" id="gen-ne-skygrid" class="gen-toggle" aria-pressed="true" data-i18n="ui.genomic.skygrid">SkyGrid</button>
-        <button type="button" id="gen-ne-exp" class="gen-toggle" aria-pressed="true" data-i18n="ui.genomic.exp">Exp</button>
+        <span class="gen-tip" role="tooltip" data-i18n="ui.genomic.ne_tip">Estimated effective population size (Nₑ) of the outbreak through time (up to the latest sample in the phylogeny). A rising curve indicates a growing epidemic; a plateau or decline indicates slowing transmission. Shaded regions represent the 95% credible intervals.</span>
       </span>
     </div>
     <div class="gen-body gen-chart" id="gen-ne-body"></div>
