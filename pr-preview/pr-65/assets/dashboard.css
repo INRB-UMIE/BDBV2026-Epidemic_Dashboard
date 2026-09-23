@@ -1452,6 +1452,12 @@
   #gen-tree-body .btn-group:has(#btn-fit),
   #gen-tree-body .fc-add,
   #gen-tree-body .pt-named-filter-wrap { display: none !important; }
+  /* Status bar: keep tip count only (PearTree also emits Dist / Age / Length). */
+  #gen-tree-body #status-stats .st-sep,
+  #gen-tree-body #status-stats .st-lbl ~ .st-lbl,
+  #gen-tree-body #status-stats .st-val ~ .st-val {
+    display: none !important;
+  }
   /* Export modal used Bootstrap's (dark-theme) body colour → near-invisible on our
      light panel; force readable ink and lift it over Leaflet's map controls. */
   #gen-tree-body .pt-modal { color: #2a2a27; --bs-body-color: #2a2a27; --bs-secondary-color: rgba(42,42,39,0.62); }
