@@ -1400,7 +1400,7 @@
      (set per-dataset in genomic.js). Deliberately NOT bold: bold changes the text
      width and reflows the button. */
   #genomic-panel .gen-chart { position: relative; height: 180px; min-height: 180px; }
-  #genomic-panel .gen-chart.gen-dist-chart { height: 260px; min-height: 260px; }
+  #genomic-panel .gen-chart.gen-dist-chart { height: 276px; min-height: 276px; }
   #genomic-panel .gen-chart.gen-corr-chart { height: 220px; min-height: 220px; }
   #genomic-panel .gen-chart svg { display: block; width: 100%; height: 100%; }
   #genomic-panel .gen-strata-legend {

@@ -49,7 +49,7 @@ _BODY = r"""<div id="genomic-panel">
       <span class="gen-title" tabindex="0">
         <h2 data-i18n="ui.genomic.dist_title">Confirmed cases &amp; genomes</h2>
         <span class="gen-info" aria-hidden="true">i</span>
-        <span class="gen-tip" role="tooltip" data-i18n="ui.genomic.dist_tip">Daily confirmed cases from the phylogenetic analyses rolling-positivity table (upward bars) and sequenced genomes from the phylogeny tips (inverted bars), stratified by Mongbwalu, Bunia/Rwampara, and other health zones. The top axis tracks sequencing coverage: genomes as a percentage of confirmed cases on each day.</span>
+        <span class="gen-tip" role="tooltip" data-i18n="ui.genomic.dist_tip">Daily confirmed cases from the phylogenetic analyses rolling-positivity table (upward bars) and sequenced genomes from the phylogeny tips (inverted bars), stratified by Mongbwalu, Bunia/Rwampara, and other health zones. Sequencing coverage is a trailing five-day rate: 100 × (genomes in the window) / (confirmed cases in the window). Note: cases are dated by symptom onset and genomes by collection date, so day-to-day percentages should not be read literally — use the line to follow changing trends.</span>
       </span>
       <span class="gen-toggles">
         <button type="button" id="gen-dist-imputed" class="gen-toggle" aria-pressed="true" data-i18n="ui.genomic.imputed" data-i18n-title="ui.genomic.imputed_title" title="Show cases with imputed onset dates">Imputed</button>
@@ -60,7 +60,7 @@ _BODY = r"""<div id="genomic-panel">
       <span class="gen-strata-item"><span class="gen-strata-swatch" data-cat="mongbwalu"></span><span data-i18n="ui.genomic.strata_mongbwalu">Mongbwalu</span></span>
       <span class="gen-strata-item"><span class="gen-strata-swatch" data-cat="bunia_rwampara"></span><span data-i18n="ui.genomic.strata_bunia_rwampara">Bunia / Rwampara</span></span>
       <span class="gen-strata-item"><span class="gen-strata-swatch" data-cat="other"></span><span data-i18n="ui.genomic.strata_other">Other</span></span>
-      <span class="gen-strata-item"><span class="gen-strata-swatch gen-strata-line" data-cat="pct"></span><span data-i18n="ui.genomic.strata_pct">Genomes / cases %</span></span>
+      <span class="gen-strata-item"><span class="gen-strata-swatch gen-strata-line" data-cat="pct"></span><span data-i18n="ui.genomic.strata_pct">Genomes / cases % (5-day)</span></span>
     </div>
     <div class="gen-body gen-chart gen-dist-chart" id="gen-dist-body"></div>
   </section>
@@ -69,7 +69,11 @@ _BODY = r"""<div id="genomic-panel">
       <span class="gen-title" tabindex="0">
         <h2 data-i18n="ui.genomic.corr_title">Cases vs sequenced genomes</h2>
         <span class="gen-info" aria-hidden="true">i</span>
-        <span class="gen-tip" role="tooltip" data-i18n="ui.genomic.corr_tip">Each point is a health zone: total confirmed cases from the rolling-positivity table versus genomes in the phylogeny. Zones well below the proportional reference line have disproportionately few sequences relative to their case burden.</span>
+        <span class="gen-tip" role="tooltip" data-i18n="ui.genomic.corr_tip">Each point is a health zone: total confirmed cases from the rolling-positivity table versus genomes in the phylogeny. Zones well below the proportional reference line have disproportionately few sequences relative to their case burden. Toggle Raw for linear counts or Log–log to compare zones across orders of magnitude.</span>
+      </span>
+      <span class="gen-toggles">
+        <button type="button" id="gen-corr-raw" class="gen-toggle" aria-pressed="true" data-i18n="ui.genomic.corr_raw" data-i18n-title="ui.genomic.corr_raw_title" title="Plot raw case and genome counts">Raw</button>
+        <button type="button" id="gen-corr-log" class="gen-toggle" aria-pressed="false" data-i18n="ui.genomic.corr_log" data-i18n-title="ui.genomic.corr_log_title" title="Plot log–log transformed counts">Log–log</button>
       </span>
     </div>
     <div class="gen-body gen-chart gen-corr-chart" id="gen-corr-body"></div>
