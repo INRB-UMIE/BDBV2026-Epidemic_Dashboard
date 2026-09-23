@@ -1465,18 +1465,18 @@
     display: none !important;
   }
   /* Export modal used Bootstrap's (dark-theme) body colour → near-invisible on our
-     light panel; force readable ink and lift it over Leaflet's map controls. */
-  #gen-tree-body .pt-modal { color: #2a2a27; --bs-body-color: #2a2a27; --bs-secondary-color: rgba(42,42,39,0.62); }
-  /* PearTree overlays are position:fixed but live inside #genomic-panel's stacking
-     context (z-index 500), which sits under the full-bleed #map. Raise the panel
-     while a modal is open so the dialog paints above the map; keep it below the
-     app's own .modal (z-index 5000) otherwise. */
-  #genomic-panel:has(.pt-modal-overlay.open),
-  #genomic-panel:has(#confirm-dialog-overlay.open),
-  #genomic-panel:has(#prompt-dialog-overlay.open) { z-index: 4500; }
-  #gen-tree-body .pt-modal-overlay,
-  #gen-tree-body #confirm-dialog-overlay,
-  #gen-tree-body #prompt-dialog-overlay { z-index: 4600; }
+     light panel; force readable ink. Overlays are reparented to document.body by
+     genomic.js (hoistPearTreeOverlays) so fixed positioning escapes #genomic-panel's
+     stacking context and paints above the full-bleed #map. */
+  #gen-tree-body .pt-modal,
+  body.view-genomic-epidemiology .pt-modal {
+    color: #2a2a27; --bs-body-color: #2a2a27; --bs-secondary-color: rgba(42,42,39,0.62);
+  }
+  body.view-genomic-epidemiology .pt-modal-overlay,
+  body.view-genomic-epidemiology #confirm-dialog-overlay,
+  body.view-genomic-epidemiology #prompt-dialog-overlay {
+    z-index: 6000 !important;
+  }
   /* Zone-colour legend: an overlay in the tree area's top-right, toggled by the
      Legend button. Built from the same palette map the tips use (genomic.js). */
   /* Overlay in the tree area's top-LEFT, below the PearTree toolbar. `top` and
