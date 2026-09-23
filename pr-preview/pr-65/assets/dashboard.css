@@ -1452,31 +1452,10 @@
   #gen-tree-body .btn-group:has(#btn-fit),
   #gen-tree-body .fc-add,
   #gen-tree-body .pt-named-filter-wrap { display: none !important; }
-  /* Status bar: keep tip count only (PearTree also emits Dist / Age / Length),
-     centred in the bar (brand is off in the embed, so left:120px is empty). */
-  #gen-tree-body #status-stats {
-    left: 0;
-    right: 0;
-    justify-content: center;
-  }
-  #gen-tree-body #status-stats .st-sep,
-  #gen-tree-body #status-stats .st-lbl ~ .st-lbl,
-  #gen-tree-body #status-stats .st-val ~ .st-val {
-    display: none !important;
-  }
   /* Export modal used Bootstrap's (dark-theme) body colour → near-invisible on our
-     light panel; force readable ink. Overlays are reparented to document.body by
-     genomic.js (hoistPearTreeOverlays) so fixed positioning escapes #genomic-panel's
-     stacking context and paints above the full-bleed #map. */
-  #gen-tree-body .pt-modal,
-  body.view-genomic-epidemiology .pt-modal {
-    color: #2a2a27; --bs-body-color: #2a2a27; --bs-secondary-color: rgba(42,42,39,0.62);
-  }
-  body.view-genomic-epidemiology .pt-modal-overlay,
-  body.view-genomic-epidemiology #confirm-dialog-overlay,
-  body.view-genomic-epidemiology #prompt-dialog-overlay {
-    z-index: 6000 !important;
-  }
+     light panel; force readable ink and lift it over Leaflet's map controls. */
+  #gen-tree-body .pt-modal { color: #2a2a27; --bs-body-color: #2a2a27; --bs-secondary-color: rgba(42,42,39,0.62); }
+  #gen-tree-body .pt-modal-overlay { z-index: 2000; }
   /* Zone-colour legend: an overlay in the tree area's top-right, toggled by the
      Legend button. Built from the same palette map the tips use (genomic.js). */
   /* Overlay in the tree area's top-LEFT, below the PearTree toolbar. `top` and

@@ -82,19 +82,6 @@
 
   var TREE_PAD_LEFT = 20, TREE_PAD_RIGHT = 20;
 
-  // Move PearTree modal overlays to document.body so position:fixed covers the
-  // viewport and stacks above #map (overlays otherwise stay in #genomic-panel's
-  // stacking context at z-index 500). Safe to call repeatedly.
-  function hoistPearTreeOverlays(host) {
-    if (!host || !document.body) return;
-    var nodes = host.querySelectorAll(
-      ".pt-modal-overlay, #confirm-dialog-overlay, #prompt-dialog-overlay"
-    );
-    for (var i = 0; i < nodes.length; i++) {
-      if (nodes[i].parentNode !== document.body) document.body.appendChild(nodes[i]);
-    }
-  }
-
   // Embeds the phylogeny via the global PearTree bundle. Returns the tree instance
   // (async, via a Promise) or null if the bundle/data is missing. The coordinator
   // (Phase 5b) consumes the returned instance for tip selection + view-lock.
@@ -149,18 +136,9 @@
     }).then(function (tree) {
       // Marker/label sizes: applyTheme drives these, so push them AFTER the theme.
       // (applySettings key for the tip-label font is `fontSize`, not tipLabelFontSize.)
-      var SHAPE_SIZES = { nodeSize: "2", tipSize: "2", fontSize: "10" };
+      var SHAPE_SIZES = { nodeSize: "3", tipSize: "4", fontSize: "10" };
       tree.applySettings(SHAPE_SIZES);
       tree.onTreeLoad(function () { tree.fitToWindow(); tree.applySettings(SHAPE_SIZES); });
-
-      // PearTree mounts dialogs inside the embed (under #genomic-panel, z-index 500).
-      // Fixed overlays then paint under the full-bleed #map — hoist them to <body>.
-      var hoistRoot = document.getElementById("genomic-panel") || host;
-      hoistPearTreeOverlays(hoistRoot);
-      if (window.MutationObserver) {
-        new MutationObserver(function () { hoistPearTreeOverlays(hoistRoot); })
-          .observe(hoistRoot, { childList: true, subtree: true });
-      }
 
       // Swallow PearTree's double-click "drill into subtree" gesture (no embed opt for
       // it) on the canvas, in the capture phase before its own handler runs.
