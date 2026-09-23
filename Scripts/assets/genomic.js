@@ -375,7 +375,7 @@
     }
 
     function render() {
-      var W = host.clientWidth || 320, H = host.clientHeight || 180;
+      var W = host.clientWidth || 320, H = host.clientHeight || 270;
       var yd = yDomain(), yMin = yd[0], yMax = yd[1];
       // Date→x anchored to the tree's live transform when present (locks the x-axis
       // to the phylogeny, so panning/zooming the tree tracks here), else the panel's
@@ -623,7 +623,7 @@
     var locked = function () { return !!(transform && isFinite(treeMin) && isFinite(treeMax) && !showBeyond); };
 
     function render() {
-      var W = host.clientWidth || 320, H = host.clientHeight || 260;
+      var W = host.clientWidth || 320, H = host.clientHeight || 414;
       var vis = days.filter(function (d) { return showBeyond || d.t <= beyondFrom; });
       if (!vis.length) vis = days;
       var lk = locked();
@@ -895,7 +895,7 @@
     }
 
     function render() {
-      var W = host.clientWidth || 320, H = host.clientHeight || 220;
+      var W = host.clientWidth || 320, H = host.clientHeight || 330;
       var xVals = rows.map(function (r) { return axisVal(r.cases); });
       var yVals = rows.map(function (r) { return axisVal(r.genomes); });
       var xMin = logScale ? Math.min.apply(null, xVals.concat([Math.log10(CORR_LOG_FLOOR)])) : 0;
