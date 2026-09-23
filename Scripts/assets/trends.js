@@ -91,7 +91,13 @@
     var dates = isoSeq(entry.start, entry.obs.length);
     var dim = size(host), svg = newSvg(host, dim.W, dim.H);
     var yMax = 0, i;
-    for (i = 0; i < dates.length; i++) yMax = Math.max(yMax, entry.obs[i] + entry.imp[i]);
+    // `|| 0` per term: Math.max is NaN-contagious, so a single short array
+    // would poison yMax for EVERY date, not just the bad one -- the whole
+    // chart renders blank rather than one bar going missing. stackedBars()
+    // already guards the same way.
+    for (i = 0; i < dates.length; i++) {
+      yMax = Math.max(yMax, (entry.obs[i] || 0) + (entry.imp[i] || 0));
+    }
 
     var fr = C.frame(svg, {
       width: dim.W, height: dim.H, pad: PAD,
@@ -119,7 +125,9 @@
   // --- Card 2: cumulative deaths --------------------------------------------
   function renderDeaths(host, scope, key) {
     var d = trends(), entry = pick("deaths", scope, key), lim = xLimits(scope, key);
-    if (!entry || !lim) return false;
+    // Match renderPositivity: an empty series falls to the empty state rather
+    // than drawing bare axes under a caption that describes absent data.
+    if (!entry || !entry.cum.length || !lim) return false;
     var dates = isoSeq(entry.start, entry.cum.length);
     var dim = size(host), svg = newSvg(host, dim.W, dim.H);
     var yMax = Math.max.apply(null, entry.cum.concat([0]));
@@ -211,7 +219,7 @@
   // --- Card 4: one chart per laboratory -------------------------------------
   function renderLab(host, lab) {
     var d = trends(), lim = d && d.lab_x;
-    if (!lim) return false;
+    if (!lim || !lab.dates.length) return false;   // see renderDeaths
     var dates = lab.dates;
     var dim = size(host), svg = newSvg(host, dim.W, dim.H);
     var maxTotal = lab.max_total;
@@ -233,6 +241,10 @@
 
     // Positivity scaled onto the SAME primary axis by * max_total, exactly as
     // the source does.
+    // maxTotal is guaranteed >= 1 by the packer (`max(1, max(counts))`, pinned
+    // by test_labs_max_total_floors_at_one), so this never collapses a real
+    // positivity reading onto the baseline. If that floor is ever removed,
+    // guard here.
     var sc = function (v) {
       if (v === null || v === undefined) return null;
       return Math.min(1, Math.max(0, v)) * maxTotal;

@@ -23,6 +23,10 @@
 
   // Tick steps of 1/2/5 x 10^n, always starting at 0.
   function niceLinearTicks(max, allowFractional) {
+    // A NaN max silently yields [] and an axis with no ticks. Fail soft to the
+    // floor instead -- genomic.js is due to migrate onto this module, so the
+    // primitive should not assume a well-formed caller.
+    if (!isFinite(max)) max = 0;
     max = Math.max(allowFractional ? 1e-9 : 1, max);
     var raw = max / 4, mag = Math.pow(10, Math.floor(Math.log10(raw)));
     var step = mag;
