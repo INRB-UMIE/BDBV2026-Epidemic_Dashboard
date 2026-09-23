@@ -310,8 +310,40 @@
       ? global.trendsEmptyMessage() : tr("ui.trends_no_plot", "No data available.")) + "</p>";
   }
 
+  // The rail is user-resizable (#trends-split-handle). Charts are drawn to a
+  // fixed viewBox with preserveAspectRatio="none", so without this a drag
+  // stretches them non-uniformly -- distorting bar widths and axis text --
+  // until some other event happens to trigger a redraw. genomic.js solves it
+  // the same way, with a ResizeObserver per panel.
+  var lastState = null;
+  var observing = false;
+
+  function observeResize() {
+    if (observing || !global.ResizeObserver) return;
+    observing = true;
+    // Debounced on a timer rather than requestAnimationFrame: a drag emits many
+    // events, and redrawing 20 lab charts per frame is wasteful. A timer is
+    // also deterministic to test, where rAF is suppressed whenever the page is
+    // not being painted.
+    var timer = null;
+    var ro = new global.ResizeObserver(function () {
+      if (timer) global.clearTimeout(timer);
+      timer = global.setTimeout(function () {
+        timer = null;
+        if (lastState) render(lastState);
+      }, 80);
+    });
+    ["trends-body", "trends-deaths-body", "trends-positivity-body", "trends-labs-body"]
+      .forEach(function (id) {
+        var el = document.getElementById(id);
+        if (el) ro.observe(el);
+      });
+  }
+
   function render(state) {
     if (!trends()) return;
+    lastState = state;
+    observeResize();
     var scope = state.scope, key = state.key;
     var place = scope === "national"
       ? tr("ui.trends_scope_national", "National")
