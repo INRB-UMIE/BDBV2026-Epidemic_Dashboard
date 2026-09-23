@@ -481,7 +481,8 @@
     };
   }
 
-  var DIST_PAD = { left: 36, right: 42, top: 36, bottom: 22 };
+  var DIST_PAD = { left: 36, right: 42, top: 36, bottom: 38 };
+  var DIST_ROLL_DAYS = 5;   // trailing window for genomes/cases %
   var DIST_OBS = "#9e2b2b", DIST_IMP = "#587e72";
   var STRATA = [
     { key: "mongbwalu", label: "Mongbwalu", color: "#c45c26" },
@@ -519,7 +520,7 @@
   }
 
   // Dual-axis cases (up) / genomes (down) panel, stratified by epicentre groups,
-  // with a top axis for daily sequencing coverage (genomes / confirmed cases %).
+  // with a top axis for trailing 5-day sequencing coverage (Σ genomes / Σ cases %).
   function renderDistPanel(genomic) {
     var host = document.getElementById("gen-dist-body");
     if (!host) return;
@@ -590,7 +591,7 @@
 
     var days = [];
     function rebuildDays() {
-      days = allDates.map(function (d) {
+      var daily = allDates.map(function (d) {
         var cases = dayCasesByStratum(d);
         var genomes = dayGenomesByStratum(d);
         var caseTot = cases.mongbwalu + cases.bunia_rwampara + cases.other;
@@ -599,8 +600,22 @@
           t: +new Date(d), ds: d,
           cases: cases, genomes: genomes,
           caseTot: caseTot, genTot: genTot,
-          pct: caseTot > 0 ? (100 * genTot) / caseTot : null
+          pct: null
         };
+      });
+      // Trailing 5-day rate: 100 × Σ genomes / Σ cases over [i−4 … i].
+      var win = DIST_ROLL_DAYS;
+      days = daily.map(function (d, i) {
+        var caseSum = 0, genSum = 0;
+        var from = Math.max(0, i - (win - 1));
+        for (var j = from; j <= i; j++) {
+          caseSum += daily[j].caseTot;
+          genSum += daily[j].genTot;
+        }
+        d.pct = caseSum > 0 ? (100 * genSum) / caseSum : null;
+        d.pctWindowCases = caseSum;
+        d.pctWindowGenomes = genSum;
+        return d;
       });
     }
     rebuildDays();
@@ -688,12 +703,19 @@
       var dL = pxToDate(DIST_PAD.left), dR = pxToDate(W - DIST_PAD.right);
       var nT = Math.max(2, Math.min(6, Math.floor((W - DIST_PAD.left) / 80)));
       for (var i = 0; i <= nT; i++) {
-        var t = dL + ((dR - dL) * i) / nT, x = xToPx(t);
+        var tickT = dL + ((dR - dL) * i) / nT, x = xToPx(tickT);
         if (x < DIST_PAD.left - 1 || x > W - DIST_PAD.right + 1) continue;
         svg.appendChild(svgEl("line", { x1: x, y1: midY, x2: x, y2: midY + 3, stroke: "#c9c7c2", "stroke-width": 1 }));
-        var xl = svgEl("text", { x: x, y: H - 6, "font-size": 9, fill: "#9c968b", "text-anchor": "middle" });
-        xl.textContent = fmtDay(t); svg.appendChild(xl);
+        var xl = svgEl("text", { x: x, y: H - 18, "font-size": 9, fill: "#9c968b", "text-anchor": "middle" });
+        xl.textContent = fmtDay(tickT); svg.appendChild(xl);
       }
+      var xAxisLbl = svgEl("text", {
+        x: (DIST_PAD.left + W - DIST_PAD.right) / 2, y: H - 4,
+        "font-size": 9, fill: "#9c968b", "text-anchor": "middle"
+      });
+      xAxisLbl.textContent = (typeof t === "function" ? t("ui.genomic.onset_collection_axis") : null)
+        || "symptom onset/collection date";
+      svg.appendChild(xAxisLbl);
 
       var gbars = svgEl("g", { "clip-path": "url(#gen-dist-clip)" });
       vis.forEach(function (d) {
@@ -742,7 +764,10 @@
         if (!best || bd > Math.max(barW, 8)) { tip.style.display = "none"; return; }
         var html = '<div class="ne-tip-d">' + fmtDay(best.t) + "</div>" +
           "<div>cases <b>" + best.caseTot + "</b> · genomes <b>" + best.genTot + "</b></div>";
-        if (best.pct != null) html += "<div>coverage <b>" + best.pct.toFixed(0) + "%</b></div>";
+        if (best.pct != null) {
+          html += "<div>5-day coverage <b>" + best.pct.toFixed(0) + "%</b>" +
+            " <span style=\"color:#9c968b\">(" + best.pctWindowGenomes + "/" + best.pctWindowCases + ")</span></div>";
+        }
         STRATA.forEach(function (s) {
           var c = best.cases[s.key] || 0, g = best.genomes[s.key] || 0;
           if (!c && !g) return;
@@ -786,10 +811,11 @@
     };
   }
 
-  var CORR_PAD = { left: 42, right: 14, top: 14, bottom: 28 };
-  var CORR_OK = "#3d6b8a", CORR_LOW = "#c45c26", CORR_SEL = "#f2c84b";
+  var CORR_PAD = { left: 48, right: 14, top: 14, bottom: 32 };
+  var CORR_PT = "#5a6a7a", CORR_SEL = "#f2c84b";
+  var CORR_LOG_FLOOR = 0.5;   // maps zeros onto the log axes without dropping points
 
-  // Scatter: confirmed cases vs genomes per health zone; flag low sequencing coverage.
+  // Scatter: confirmed cases vs genomes per health zone (raw or log–log).
   // Clicking a point selects that health zone on the map + phylogeny (via coordinator).
   function renderCorrPanel(genomic) {
     var host = document.getElementById("gen-corr-body");
@@ -798,13 +824,13 @@
     var byZone = od.by_zone || {};
     var tips = genomic.tips || [];
     if (!Object.keys(byZone).length && !tips.length) {
-      host.textContent = "No zone-level case/genome data";
+      host.textContent = (typeof t === "function" ? t("ui.genomic.no_corr_data") : null) || "No zone-level case/genome data";
       return;
     }
 
     var genomes = {};
-    tips.forEach(function (t) {
-      var z = realZone(t.health_zone);
+    tips.forEach(function (tipRow) {
+      var z = realZone(tipRow.health_zone);
       if (!z) return;
       genomes[z] = (genomes[z] || 0) + 1;
     });
@@ -823,27 +849,36 @@
       if (cases <= 0 && g <= 0) return;
       rows.push({ zone: z, cases: cases, genomes: g, coverage: cases > 0 ? g / cases : null });
     });
-    if (!rows.length) { host.textContent = "No zone-level case/genome data"; return; }
+    if (!rows.length) {
+      host.textContent = (typeof t === "function" ? t("ui.genomic.no_corr_data") : null) || "No zone-level case/genome data";
+      return;
+    }
 
     var totC = rows.reduce(function (s, r) { return s + r.cases; }, 0);
     var totG = rows.reduce(function (s, r) { return s + r.genomes; }, 0);
     var natRate = totC > 0 ? totG / totC : 0;
-    rows.forEach(function (r) {
-      r.expected = r.cases * natRate;
-      r.low = r.cases >= 3 && r.coverage != null && r.coverage < Math.max(0.01, natRate * 0.5);
-    });
-    rows.sort(function (a, b) { return (b.low - a.low) || (b.cases - a.cases); });
+    rows.sort(function (a, b) { return b.cases - a.cases; });
 
     var tip = document.createElement("div"); tip.className = "ne-tip"; tip.style.display = "none";
-    var selectedUpper = null;   // currently highlighted zone (UPPER)
+    var selectedUpper = null;
     var zoneClickCb = null;
-    var layout = null;          // last render's xToPx/yToPx for hit-testing
+    var layout = null;
+    var logScale = false;
+
+    function axisVal(v) {
+      return logScale ? Math.log10(Math.max(v, CORR_LOG_FLOOR)) : v;
+    }
+    function axisLabel(v) {
+      if (!logScale) return String(v);
+      if (v >= 1) return String(Math.round(v));
+      return String(v);
+    }
 
     function hitRow(mx, my) {
       if (!layout) return null;
       var best = null, bd = Infinity;
       rows.forEach(function (r) {
-        var dx = layout.xToPx(r.cases) - mx, dy = layout.yToPx(r.genomes) - my;
+        var dx = layout.xToPx(axisVal(r.cases)) - mx, dy = layout.yToPx(axisVal(r.genomes)) - my;
         var dd = Math.sqrt(dx * dx + dy * dy);
         if (dd < bd) { bd = dd; best = r; }
       });
@@ -852,27 +887,52 @@
 
     function render() {
       var W = host.clientWidth || 320, H = host.clientHeight || 220;
-      var xMax = Math.max(1, Math.max.apply(null, rows.map(function (r) { return r.cases; })));
-      var yMax = Math.max(1, Math.max.apply(null, rows.map(function (r) { return r.genomes; })));
-      xMax = Math.ceil(xMax * 1.05); yMax = Math.ceil(yMax * 1.05);
-      var xToPx = function (v) { return CORR_PAD.left + (v / xMax) * (W - CORR_PAD.left - CORR_PAD.right); };
-      var yToPx = function (v) { return (H - CORR_PAD.bottom) - (v / yMax) * (H - CORR_PAD.top - CORR_PAD.bottom); };
+      var xVals = rows.map(function (r) { return axisVal(r.cases); });
+      var yVals = rows.map(function (r) { return axisVal(r.genomes); });
+      var xMin = logScale ? Math.min.apply(null, xVals.concat([Math.log10(CORR_LOG_FLOOR)])) : 0;
+      var yMin = logScale ? Math.min.apply(null, yVals.concat([Math.log10(CORR_LOG_FLOOR)])) : 0;
+      var xMax = Math.max.apply(null, xVals.concat([xMin + 0.001]));
+      var yMax = Math.max.apply(null, yVals.concat([yMin + 0.001]));
+      if (!logScale) {
+        xMax = Math.ceil(xMax * 1.05) || 1;
+        yMax = Math.ceil(yMax * 1.05) || 1;
+        xMin = 0; yMin = 0;
+      } else {
+        var xr = niceLogRange(Math.pow(10, xMin), Math.pow(10, xMax));
+        var yr = niceLogRange(Math.pow(10, yMin), Math.pow(10, yMax));
+        xMin = Math.log10(xr[0]); xMax = Math.log10(xr[1]);
+        yMin = Math.log10(yr[0]); yMax = Math.log10(yr[1]);
+      }
+      var xSpan = (xMax - xMin) || 1, ySpan = (yMax - yMin) || 1;
+      var xToPx = function (v) {
+        return CORR_PAD.left + ((v - xMin) / xSpan) * (W - CORR_PAD.left - CORR_PAD.right);
+      };
+      var yToPx = function (v) {
+        return (H - CORR_PAD.bottom) - ((v - yMin) / ySpan) * (H - CORR_PAD.top - CORR_PAD.bottom);
+      };
       layout = { xToPx: xToPx, yToPx: yToPx, W: W, H: H };
 
       host.replaceChildren();
       var svg = svgEl("svg", { viewBox: "0 0 " + W + " " + H, preserveAspectRatio: "none", style: "cursor:default" });
 
-      niceLinearTicks(xMax).forEach(function (v) {
-        var x = xToPx(v);
+      var xTicks = logScale
+        ? logTicks(Math.pow(10, xMin), Math.pow(10, xMax)).map(function (v) { return { raw: v, ax: Math.log10(v) }; })
+        : niceLinearTicks(xMax).map(function (v) { return { raw: v, ax: v }; });
+      var yTicks = logScale
+        ? logTicks(Math.pow(10, yMin), Math.pow(10, yMax)).map(function (v) { return { raw: v, ax: Math.log10(v) }; })
+        : niceLinearTicks(yMax).map(function (v) { return { raw: v, ax: v }; });
+
+      xTicks.forEach(function (tk) {
+        var x = xToPx(tk.ax);
         svg.appendChild(svgEl("line", { x1: x, y1: CORR_PAD.top, x2: x, y2: H - CORR_PAD.bottom, stroke: "#eee", "stroke-width": 1 }));
-        var lbl = svgEl("text", { x: x, y: H - 8, "font-size": 9, fill: "#9c968b", "text-anchor": "middle" });
-        lbl.textContent = String(v); svg.appendChild(lbl);
+        var lbl = svgEl("text", { x: x, y: H - 14, "font-size": 9, fill: "#9c968b", "text-anchor": "middle" });
+        lbl.textContent = axisLabel(tk.raw); svg.appendChild(lbl);
       });
-      niceLinearTicks(yMax).forEach(function (v) {
-        var y = yToPx(v);
+      yTicks.forEach(function (tk) {
+        var y = yToPx(tk.ax);
         svg.appendChild(svgEl("line", { x1: CORR_PAD.left, y1: y, x2: W - CORR_PAD.right, y2: y, stroke: "#eee", "stroke-width": 1 }));
         var lbl = svgEl("text", { x: CORR_PAD.left - 4, y: y + 3, "font-size": 9, fill: "#9c968b", "text-anchor": "end" });
-        lbl.textContent = String(v); svg.appendChild(lbl);
+        lbl.textContent = axisLabel(tk.raw); svg.appendChild(lbl);
       });
 
       svg.appendChild(svgEl("line", {
@@ -883,35 +943,60 @@
         x1: CORR_PAD.left, y1: CORR_PAD.top, x2: CORR_PAD.left, y2: H - CORR_PAD.bottom,
         stroke: "#c9c7c2", "stroke-width": 1
       }));
-      var xlab = svgEl("text", { x: (CORR_PAD.left + W - CORR_PAD.right) / 2, y: H - 1, "font-size": 9, fill: "#9c968b", "text-anchor": "middle" });
-      xlab.textContent = "confirmed cases"; svg.appendChild(xlab);
+      var xlab = svgEl("text", { x: (CORR_PAD.left + W - CORR_PAD.right) / 2, y: H - 2, "font-size": 9, fill: "#9c968b", "text-anchor": "middle" });
+      xlab.textContent = (typeof t === "function" ? t("ui.genomic.confirmed_cases_axis") : null) || "confirmed cases";
+      svg.appendChild(xlab);
       var ylab = svgEl("text", {
-        x: 11, y: (CORR_PAD.top + H - CORR_PAD.bottom) / 2, "font-size": 9, fill: "#9c968b",
-        "text-anchor": "middle", transform: "rotate(-90 11 " + ((CORR_PAD.top + H - CORR_PAD.bottom) / 2) + ")"
+        x: 12, y: (CORR_PAD.top + H - CORR_PAD.bottom) / 2, "font-size": 9, fill: "#9c968b",
+        "text-anchor": "middle", transform: "rotate(-90 12 " + ((CORR_PAD.top + H - CORR_PAD.bottom) / 2) + ")"
       });
-      ylab.textContent = "genomes"; svg.appendChild(ylab);
+      ylab.textContent = (typeof t === "function" ? t("ui.genomic.genomes_axis") : null) || "genomes";
+      svg.appendChild(ylab);
 
       if (natRate > 0) {
-        var xEnd = Math.min(xMax, yMax / natRate);
-        var yEnd = xEnd * natRate;
-        svg.appendChild(svgEl("line", {
-          x1: xToPx(0), y1: yToPx(0), x2: xToPx(xEnd), y2: yToPx(yEnd),
-          stroke: "#9c968b", "stroke-width": 1, "stroke-dasharray": "4,3", opacity: 0.9
-        }));
-        var ref = svgEl("text", { x: xToPx(xEnd * 0.7), y: yToPx(yEnd * 0.7) - 4, "font-size": 8, fill: "#9c968b" });
-        ref.textContent = "national rate"; svg.appendChild(ref);
+        // genomes = natRate × cases → a line of slope 1 in log–log space.
+        var c0 = logScale ? Math.pow(10, xMin) : 0;
+        var c1 = logScale ? Math.pow(10, xMax) : xMax;
+        var g0 = c0 * natRate, g1 = c1 * natRate;
+        if (logScale) {
+          g0 = Math.max(g0, CORR_LOG_FLOOR);
+          g1 = Math.max(g1, CORR_LOG_FLOOR);
+        }
+        var x0a = axisVal(c0), y0a = axisVal(g0);
+        var x1a = axisVal(c1), y1a = axisVal(g1);
+        // Clip the reference line to the plotted axis ranges.
+        if (y0a < yMin) {
+          var f0 = (yMin - y0a) / ((y1a - y0a) || 1);
+          x0a = x0a + f0 * (x1a - x0a); y0a = yMin;
+        }
+        if (y1a > yMax) {
+          var f1 = (yMax - y0a) / ((y1a - y0a) || 1);
+          x1a = x0a + f1 * (x1a - x0a); y1a = yMax;
+        }
+        if (y0a <= yMax && y1a >= yMin) {
+          svg.appendChild(svgEl("line", {
+            x1: xToPx(x0a), y1: yToPx(y0a), x2: xToPx(x1a), y2: yToPx(y1a),
+            stroke: "#9c968b", "stroke-width": 1, "stroke-dasharray": "4,3", opacity: 0.9
+          }));
+          var ref = svgEl("text", {
+            x: xToPx(x0a + 0.7 * (x1a - x0a)), y: yToPx(y0a + 0.7 * (y1a - y0a)) - 4,
+            "font-size": 8, fill: "#9c968b"
+          });
+          ref.textContent = (typeof t === "function" ? t("ui.genomic.national_rate") : null) || "national rate";
+          svg.appendChild(ref);
+        }
       }
 
       rows.forEach(function (r) {
-        var cx = xToPx(r.cases), cy = yToPx(r.genomes);
+        var cx = xToPx(axisVal(r.cases)), cy = yToPx(axisVal(r.genomes));
         var selected = selectedUpper && up(r.zone) === selectedUpper;
         var circle = svgEl("circle", {
           cx: cx, cy: cy,
-          r: selected ? 7 : (r.low ? 5 : 3.5),
-          fill: selected ? CORR_SEL : (r.low ? CORR_LOW : CORR_OK),
-          opacity: selected ? 1 : (r.low ? 0.95 : 0.75),
-          stroke: selected ? "#9a7a16" : (r.low ? "#7a3410" : "none"),
-          "stroke-width": selected || r.low ? 1.5 : 0,
+          r: selected ? 7 : 4,
+          fill: selected ? CORR_SEL : CORR_PT,
+          opacity: selected ? 1 : 0.8,
+          stroke: selected ? "#9a7a16" : "none",
+          "stroke-width": selected ? 1.5 : 0,
           "data-zone": r.zone,
           style: "cursor:pointer"
         });
@@ -920,17 +1005,18 @@
           if (zoneClickCb) zoneClickCb(r.zone);
         });
         svg.appendChild(circle);
-        if (r.low || selected) {
+        if (selected) {
           var lab = svgEl("text", {
             x: cx + 6, y: cy - 4, "font-size": 8,
-            fill: selected ? "#9a7a16" : CORR_LOW, style: "pointer-events:none"
+            fill: "#9a7a16", style: "pointer-events:none"
           });
           lab.textContent = r.zone; svg.appendChild(lab);
         }
       });
 
-      var legend = svgEl("text", { x: W - CORR_PAD.right, y: CORR_PAD.top + 8, "font-size": 8, fill: CORR_LOW, "text-anchor": "end" });
-      legend.textContent = "● low genome coverage · click a point to select"; svg.appendChild(legend);
+      var legend = svgEl("text", { x: W - CORR_PAD.right, y: CORR_PAD.top + 8, "font-size": 8, fill: "#9c968b", "text-anchor": "end" });
+      legend.textContent = (typeof t === "function" ? t("ui.genomic.click_to_select") : null) || "click a point to select";
+      svg.appendChild(legend);
 
       host.appendChild(svg); host.appendChild(tip);
       svg.addEventListener("mousemove", function (ev) {
@@ -943,8 +1029,10 @@
         tip.innerHTML = '<div class="ne-tip-d">' + best.zone + "</div>" +
           "<div>cases <b>" + best.cases + "</b></div>" +
           "<div>genomes <b>" + best.genomes + "</b></div>" +
-          "<div>coverage <b>" + cov + "</b>" + (best.low ? " · low" : "") + "</div>" +
-          '<div style="color:#9c968b;margin-top:2px">click to select on map/tree</div>';
+          "<div>coverage <b>" + cov + "</b></div>" +
+          '<div style="color:#9c968b;margin-top:2px">' +
+          ((typeof t === "function" ? t("ui.genomic.click_to_select") : null) || "click to select on map/tree") +
+          "</div>";
         tip.style.display = "";
         tip.style.left = Math.min(mx + 8, W - 130) + "px";
         tip.style.top = Math.max(4, my - 40) + "px";
@@ -952,11 +1040,21 @@
       svg.addEventListener("mouseleave", function () { tip.style.display = "none"; svg.style.cursor = "default"; });
     }
 
+    function setLogScale(on) {
+      logScale = !!on;
+      applyToggleStyle(rawBtn, !logScale, CORR_PT, "rgba(90,106,122,0.14)");
+      applyToggleStyle(logBtn, logScale, CORR_PT, "rgba(90,106,122,0.14)");
+      render();
+    }
+    var rawBtn = document.getElementById("gen-corr-raw");
+    var logBtn = document.getElementById("gen-corr-log");
+    if (rawBtn) rawBtn.addEventListener("click", function (e) { e.preventDefault(); setLogScale(false); });
+    if (logBtn) logBtn.addEventListener("click", function (e) { e.preventDefault(); setLogScale(true); });
+    setLogScale(false);
+
     if (window.ResizeObserver) { new ResizeObserver(render).observe(host); }
-    render();
     return {
       refresh: render,
-      // Mirror distPanel.setZones: [] clears; one or more zones highlights the first match.
       setZones: function (zones) {
         var z = (zones && zones.length) ? zones[0] : null;
         selectedUpper = z ? up(z) : null;
