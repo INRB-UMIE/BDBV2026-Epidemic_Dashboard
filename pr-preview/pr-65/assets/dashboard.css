@@ -1399,9 +1399,9 @@
   /* Active state = coloured border + text + a light shade of the dataset's band
      (set per-dataset in genomic.js). Deliberately NOT bold: bold changes the text
      width and reflows the button. */
-  #genomic-panel .gen-chart { position: relative; height: 180px; min-height: 180px; }
-  #genomic-panel .gen-chart.gen-dist-chart { height: 276px; min-height: 276px; }
-  #genomic-panel .gen-chart.gen-corr-chart { height: 220px; min-height: 220px; }
+  #genomic-panel .gen-chart { position: relative; height: 270px; min-height: 270px; }
+  #genomic-panel .gen-chart.gen-dist-chart { height: 414px; min-height: 414px; }
+  #genomic-panel .gen-chart.gen-corr-chart { height: 330px; min-height: 330px; }
   #genomic-panel .gen-chart svg { display: block; width: 100%; height: 100%; }
   #genomic-panel .gen-strata-legend {
     display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px;
