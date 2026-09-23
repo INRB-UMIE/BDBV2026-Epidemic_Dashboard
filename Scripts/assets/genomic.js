@@ -136,7 +136,7 @@
     }).then(function (tree) {
       // Marker/label sizes: applyTheme drives these, so push them AFTER the theme.
       // (applySettings key for the tip-label font is `fontSize`, not tipLabelFontSize.)
-      var SHAPE_SIZES = { nodeSize: "3", tipSize: "2", fontSize: "10" };
+      var SHAPE_SIZES = { nodeSize: "2", tipSize: "2", fontSize: "10" };
       tree.applySettings(SHAPE_SIZES);
       tree.onTreeLoad(function () { tree.fitToWindow(); tree.applySettings(SHAPE_SIZES); });
 
