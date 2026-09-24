@@ -3890,7 +3890,9 @@ def _trends_loc(row, key_field):
     name = (row.get(key_field) or "").strip()
     if not name or name.upper() == "NA":
         return None
-    return name
+    # Repair before canon(): a damaged name would not match any canonical nom,
+    # so it would survive as its own broken entry in the scope dropdown.
+    return _fix_mojibake(name)
 
 
 def _trends_scale_loc(row, canon):
@@ -4058,6 +4060,53 @@ def _pack_trends_positivity(path, canon=None):
     return packed
 
 
+# Upstream has shipped lab names whose UTF-8 bytes were decoded with the wrong
+# codec before being written back out -- e.g. "Laboratoire Provincial de Sant√©
+# Publique de Bunia", where C3 A9 (e-acute) was read as MacRoman. The damage is
+# exactly reversible, and lab_name_long is the only free-text field the Trends
+# tab renders from this source.
+_MOJIBAKE_HINT = re.compile(r"[\u221a\u00c3]|\u00e2\u20ac")
+
+
+def _fix_mojibake(text):
+    """Undo a UTF-8 string that was decoded with the wrong codec.
+
+    The candidate codec is chosen by the damage signature, not by trying each
+    in turn: MacRoman and Latin-1 damage are bijective in BOTH directions, so a
+    round-trip check alone happily "repairs" Latin-1 damage with MacRoman and
+    yields a combining-mark soup that round-trips perfectly.
+
+    Two guards on top of that: the repair must remove the signature, and must
+    not introduce combining marks (which is what a wrong-codec repair produces).
+    A name that legitimately contains one of these characters fails both and is
+    returned untouched.
+    """
+    if not text:
+        return text
+    codecs = []
+    if "\u221a" in text:                              # MacRoman: e-acute -> "\u221a\u00a9"
+        codecs.append("mac_roman")
+    if "\u00c3" in text or "\u00e2\u20ac" in text:  # Latin-1 / cp1252
+        codecs += ["cp1252", "latin-1"]
+    if not codecs:
+        return text
+    for codec in codecs:
+        try:
+            repaired = text.encode(codec).decode("utf-8")
+        except (UnicodeEncodeError, UnicodeDecodeError):
+            continue
+        if _MOJIBAKE_HINT.search(repaired):
+            continue
+        if any(unicodedata.combining(ch) for ch in repaired):
+            continue
+        try:
+            if repaired.encode("utf-8").decode(codec) == text:
+                return repaired
+        except (UnicodeEncodeError, UnicodeDecodeError):
+            continue
+    return text
+
+
 def _pack_trends_labs(path):
     """(labs[], lab_x) from lab_positivity_aggregated.csv.
 
@@ -4076,9 +4125,9 @@ def _pack_trends_labs(path):
             mean = _parse_optional_float(row.get("daily_positivity_mean"))
             if mean is None:
                 continue
-            long_name = (row.get("lab_name_long") or "").strip()
-            hz = (row.get("health_zone") or "").strip()
-            prov = (row.get("province") or "").strip()
+            long_name = _fix_mojibake((row.get("lab_name_long") or "").strip())
+            hz = _fix_mojibake((row.get("health_zone") or "").strip())
+            prov = _fix_mojibake((row.get("province") or "").strip())
             earliest = (row.get("earliest_analysed_sample") or "").strip()
             lab = by_lab.setdefault(code, {
                 "id": "lab_" + _slugify_plot_key(code),

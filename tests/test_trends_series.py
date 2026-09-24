@@ -930,3 +930,61 @@ def test_load_trends_series_is_not_none_when_csvs_are_present_but_header_only(tm
     assert res["labs"] == []
     assert res["lab_x"] is None
     assert res["x_limits"] == {"national": {}, "province": {}, "healthzone": {}}
+
+
+# --- mojibake repair -------------------------------------------------------
+# Upstream has shipped a lab whose name's UTF-8 bytes were decoded with the
+# wrong codec before being written back: "Laboratoire Provincial de Sant\u221a\u00a9
+# Publique de Bunia". Observed on BDBV2026-Processed_Sensitive_Data's
+# dev_matching_dashboard branch (snapshot 2026-07-29), which the PR-preview
+# build reads; main was clean at the time. lab_name_long is the only free-text
+# field the Trends tab renders from that source.
+
+def test_mojibake_repair_fixes_the_real_upstream_lab_name():
+    damaged = "Laboratoire Provincial de Sant\u221a\u00a9 Publique de Bunia"
+    assert ds._fix_mojibake(damaged) == "Laboratoire Provincial de Sant\u00e9 Publique de Bunia"
+
+
+def test_mojibake_repair_handles_latin1_damage_not_just_macroman():
+    # MacRoman and Latin-1 damage are bijective in BOTH directions, so trying
+    # codecs in order and round-trip-checking "repairs" this one with MacRoman
+    # into combining-mark soup that round-trips perfectly. The codec must be
+    # chosen by the damage signature.
+    assert ds._fix_mojibake("Sant\u00c3\u00a9") == "Sant\u00e9"
+
+
+def test_mojibake_repair_leaves_clean_names_untouched():
+    for name in ("Laboratoire de Bunia", "Laboratoire de Sant\u00e9", "Kinshasa", "", None):
+        assert ds._fix_mojibake(name) == name
+
+
+def test_labs_packer_repairs_the_damaged_name(tmp_path):
+    csv_text = (
+        "lab_name,lab_name_long,health_zone,province,lab_analysis_date,"
+        "earliest_analysed_sample,confirmed_case,total_samples_analysed_daily,"
+        "rolling_confirmed,rolling_total,daily_positivity_mean,"
+        "daily_positivity_lower,daily_positivity_upper\n"
+        "LPSPBN,Laboratoire Provincial de Sant\u221a\u00a9 Publique de Bunia,Bunia,Ituri,"
+        "2026-05-14,2026-05-14,1,2,1,2,0.5,0.2,0.8\n"
+    )
+    (tmp_path / "lab_positivity_aggregated.csv").write_text(csv_text, encoding="utf-8")
+
+    labs, _ = ds._pack_trends_labs(tmp_path / "lab_positivity_aggregated.csv")
+
+    assert labs[0]["label"] == "Laboratoire Provincial de Sant\u00e9 Publique de Bunia"
+    assert "\u221a" not in labs[0]["label"]
+
+
+def test_damaged_location_names_are_repaired_before_canon(tmp_path):
+    # A damaged zone name would match no canonical nom, so it would survive as
+    # its own broken entry in the scope dropdown.
+    csv_text = (
+        "date_of_symptom_onset_imputed,onset_date_was_imputed,confirmed_case,"
+        "spatial_scale,province,health_zone\n"
+        "2026-05-02,FALSE,4,healthzone,NA,Sant\u221a\u00a9ville\n"
+    )
+    (tmp_path / "status_aggregated.csv").write_text(csv_text, encoding="utf-8")
+
+    out = ds._pack_trends_cases(tmp_path / "status_aggregated.csv")
+
+    assert list(out["healthzone"]) == ["Sant\u00e9ville"]
