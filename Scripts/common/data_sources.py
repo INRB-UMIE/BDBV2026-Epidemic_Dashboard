@@ -4068,6 +4068,20 @@ def _pack_trends_positivity(path, canon=None):
 _MOJIBAKE_HINT = re.compile(r"[\u221a\u00c3]|\u00e2\u20ac")
 
 
+def _or_none(value):
+    """Blank, or the literal string "NA", -> None.
+
+    These CSVs are written by R, which renders a missing value as the two
+    characters NA. Read back in Python that is an ordinary truthy string, so it
+    silently beats any `or` fallback -- which is how a lab with no long name
+    came to be titled "NA" instead of falling back to its code. R's own
+    read.csv turns it back into a real NA, so the generator falls back
+    correctly; we have to do that explicitly.
+    """
+    text = (value or "").strip()
+    return None if not text or text.upper() == "NA" else text
+
+
 def _fix_mojibake(text):
     """Undo a UTF-8 string that was decoded with the wrong codec.
 
@@ -4125,16 +4139,19 @@ def _pack_trends_labs(path):
             mean = _parse_optional_float(row.get("daily_positivity_mean"))
             if mean is None:
                 continue
-            long_name = _fix_mojibake((row.get("lab_name_long") or "").strip())
-            hz = _fix_mojibake((row.get("health_zone") or "").strip())
-            prov = _fix_mojibake((row.get("province") or "").strip())
+            long_name = _or_none(row.get("lab_name_long"))
+            hz = _or_none(row.get("health_zone"))
+            prov = _or_none(row.get("province"))
             earliest = (row.get("earliest_analysed_sample") or "").strip()
             lab = by_lab.setdefault(code, {
                 "id": "lab_" + _slugify_plot_key(code),
                 "code": code,
-                "label": long_name or code,
-                "health_zone": hz if hz and hz.upper() != "NA" else None,
-                "province": prov if prov and prov.upper() != "NA" else None,
+                # Falls back to the lab code, matching the generator: its
+                # read.csv yields a real NA, so its own nzchar() test fails and
+                # it titles the chart "LBMAM" rather than "NA".
+                "label": _fix_mojibake(long_name) if long_name else code,
+                "health_zone": _fix_mojibake(hz) if hz else None,
+                "province": _fix_mojibake(prov) if prov else None,
                 "earliest": earliest if _ISO_DATE_RE.match(earliest) else None,
                 "rows": {},
             })

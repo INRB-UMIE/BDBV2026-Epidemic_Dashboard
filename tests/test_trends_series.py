@@ -988,3 +988,59 @@ def test_damaged_location_names_are_repaired_before_canon(tmp_path):
     out = ds._pack_trends_cases(tmp_path / "status_aggregated.csv")
 
     assert list(out["healthzone"]) == ["Sant\u00e9ville"]
+
+
+# --- literal "NA" in free-text lab fields ----------------------------------
+# These CSVs come from R, which writes a missing value as the two characters
+# NA. Read back in Python that is a truthy string, so it beats an `or`
+# fallback: a lab with no long name was titled "NA" instead of its code.
+# Observed on main (LPST, 1 of 20 labs) and dev_matching_dashboard (LBMAM and
+# 9 others, 10 of 16). The generator's read.csv yields a real NA, so its SVGs
+# correctly title those charts "LPST" / "LBMAM".
+
+def _lab_csv(long_name, health_zone, province):
+    return (
+        "lab_name,lab_name_long,health_zone,province,lab_analysis_date,"
+        "earliest_analysed_sample,confirmed_case,total_samples_analysed_daily,"
+        "rolling_confirmed,rolling_total,daily_positivity_mean,"
+        "daily_positivity_lower,daily_positivity_upper\n"
+        "LBMAM,%s,%s,%s,2026-05-14,2026-05-14,1,2,1,2,0.5,0.2,0.8\n"
+        % (long_name, health_zone, province)
+    )
+
+
+def test_lab_named_NA_falls_back_to_its_code(tmp_path):
+    (tmp_path / "lab_positivity_aggregated.csv").write_text(
+        _lab_csv("NA", "Mambasa", "Ituri"), encoding="utf-8")
+
+    labs, _ = ds._pack_trends_labs(tmp_path / "lab_positivity_aggregated.csv")
+
+    assert labs[0]["label"] == "LBMAM"          # not "NA"
+    assert labs[0]["health_zone"] == "Mambasa"  # a real value is still kept
+
+
+def test_lab_with_NA_location_fields_reports_none(tmp_path):
+    (tmp_path / "lab_positivity_aggregated.csv").write_text(
+        _lab_csv("NA", "NA", "NA"), encoding="utf-8")
+
+    labs, _ = ds._pack_trends_labs(tmp_path / "lab_positivity_aggregated.csv")
+
+    assert labs[0]["label"] == "LBMAM"
+    assert labs[0]["health_zone"] is None
+    assert labs[0]["province"] is None
+
+
+def test_lab_long_name_is_used_when_present(tmp_path):
+    (tmp_path / "lab_positivity_aggregated.csv").write_text(
+        _lab_csv("Laboratoire Mambasa", "Mambasa", "Ituri"), encoding="utf-8")
+
+    labs, _ = ds._pack_trends_labs(tmp_path / "lab_positivity_aggregated.csv")
+
+    assert labs[0]["label"] == "Laboratoire Mambasa"
+
+
+def test_or_none_treats_NA_and_blank_as_absent():
+    for absent in ("NA", "na", " NA ", "", "   ", None):
+        assert ds._or_none(absent) is None
+    for present in ("Mambasa", "Ituri", "Nia Nia", "0"):
+        assert ds._or_none(present) == present.strip()
