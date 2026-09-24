@@ -48,8 +48,18 @@ env:
   GIT_LFS_SKIP_SMUDGE: "1"
   DATA_REPO: INRB-UMIE/BDBV2026-Data
   PROCESSED_DATA_REPO: INRB-UMIE/BDBV2026-Processed_Sensitive_Data
-  # Previews track dev_matching_dashboard plots; production builds use main.
-  PROCESSED_DATA_REF: dev_matching_dashboard
+  # Same ref production builds from (build-dashboard.yml defaults to main), so a
+  # preview shows the data the merge will actually ship.
+  #
+  # This was pinned to dev_matching_dashboard when the preview workflow was
+  # first written. That branch was last updated 2026-07-29 and has not moved
+  # since, so previews were rendering a snapshot ~2 months behind production --
+  # which made ordinary data drift look like regressions. On the 2026-07-29
+  # snapshot, 16 health zones were coloured on the map with no onset chart
+  # (zones in the sitrep but not yet in the line list); on main the gap is 0.
+  #
+  # Re-pin to a branch here if a preview ever needs to track divergent data.
+  PROCESSED_DATA_REF: main
 
 jobs:
   deploy-preview:
