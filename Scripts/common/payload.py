@@ -139,12 +139,16 @@ def build_shared_payload() -> dict:
         # Reconcile tip health_zone spellings to the canonical noms (producer typos
         # like 'Nyakunde'->'Nyankunde' otherwise break map<->tree selection + case scope).
         canonicalize_genomic_zones(genomic, set(zone_data))
-        genomic["onset_distribution"] = load_onset_imputed_series(
+        # Cases for the genomic time-series + cases-vs-genomes scatter come from
+        # Phylogenetic_Analyses rolling_positivity.csv (confirmed_case), not the
+        # processed-data imputed-onset linelist.
+        genomic["onset_distribution"] = load_rolling_positivity_case_series(
             known_noms=set(zone_data),
             tree_most_recent=(genomic.get("meta") or {}).get("mostRecentDate"),
         )
         print(f"  genomic: {len(genomic.get('tips', []))} tips, "
-              f"onset {len(genomic.get('onset_distribution', {}).get('dates', []))} dates")
+              f"cases {len(genomic.get('onset_distribution', {}).get('dates', []))} dates "
+              f"({(genomic.get('onset_distribution') or {}).get('case_source', 'missing')})")
 
     asof_date = detect_asof_date()
     asof = _format_asof(asof_date) if asof_date is not None else ASOF_FALLBACK

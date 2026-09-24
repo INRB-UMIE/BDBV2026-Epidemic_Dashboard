@@ -1423,8 +1423,24 @@
   /* Active state = coloured border + text + a light shade of the dataset's band
      (set per-dataset in genomic.js). Deliberately NOT bold: bold changes the text
      width and reflows the button. */
-  #genomic-panel .gen-chart { position: relative; height: 180px; min-height: 180px; }
+  #genomic-panel .gen-chart { position: relative; height: 270px; min-height: 270px; }
+  #genomic-panel .gen-chart.gen-dist-chart { height: 414px; min-height: 414px; }
+  #genomic-panel .gen-chart.gen-corr-chart { height: 330px; min-height: 330px; }
   #genomic-panel .gen-chart svg { display: block; width: 100%; height: 100%; }
+  #genomic-panel .gen-strata-legend {
+    display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px;
+    margin: 0 0 6px; font-size: 10px; color: #5c574f;
+  }
+  #genomic-panel .gen-strata-swatch {
+    display: inline-block; width: 10px; height: 10px; border-radius: 2px;
+    margin-right: 4px; vertical-align: -1px;
+  }
+  #genomic-panel .gen-strata-swatch[data-cat="mongbwalu"] { background: #c45c26; }
+  #genomic-panel .gen-strata-swatch[data-cat="bunia_rwampara"] { background: #3d6b8a; }
+  #genomic-panel .gen-strata-swatch[data-cat="other"] { background: #8a8578; }
+  #genomic-panel .gen-strata-swatch.gen-strata-line {
+    width: 14px; height: 0; border-top: 2px dashed #2a2a27; border-radius: 0; background: transparent;
+  }
   #genomic-panel .ne-tip {
     position: absolute; pointer-events: none; background: rgba(255,255,255,0.97);
     border: 1px solid #e7e3db; border-radius: 6px; padding: 4px 7px; font-size: 10.5px;
@@ -1432,12 +1448,16 @@
   }
   #genomic-panel .ne-tip-d { font-weight: 700; margin-bottom: 2px; }
   #genomic-panel .ne-tip-ci { color: #9c968b; }
+  #genomic-panel .gen-ne-stale-note {
+    margin: 6px 10px 8px; font-size: 11px; line-height: 1.35; color: #7a7468;
+    font-style: italic;
+  }
 
   /* ── Phylogeny (embedded PearTree) ── */
   /* The tree needs a definite height for the embed's height:100% to resolve; the
      rail scrolls, so a fixed area is fine. .gen-tree-wrap is the positioning
      context for both the embed and the overlay legend. */
-  #genomic-panel .gen-tree-wrap { position: relative; height: 360px; min-height: 220px; }
+  #genomic-panel .gen-tree-wrap { position: relative; height: 360px; min-height: 220px; overflow: hidden; }
   #genomic-panel .gen-tree-body { position: absolute; inset: 0; font-size: 12px; color: #5c574f; }
   /* Retint PearTree's --pt-* interface vars to the light rail palette (id
      specificity beats the bundle's [data-bs-theme]); the canvas/background comes
@@ -1456,10 +1476,32 @@
   #gen-tree-body .btn-group:has(#btn-fit),
   #gen-tree-body .fc-add,
   #gen-tree-body .pt-named-filter-wrap { display: none !important; }
-  /* Export modal used Bootstrap's (dark-theme) body colour → near-invisible on our
-     light panel; force readable ink and lift it over Leaflet's map controls. */
-  #gen-tree-body .pt-modal { color: #2a2a27; --bs-body-color: #2a2a27; --bs-secondary-color: rgba(42,42,39,0.62); }
-  #gen-tree-body .pt-modal-overlay { z-index: 2000; }
+  /* Status bar: Tips count only, centred (hide Dist / Age / Length). */
+  #gen-tree-body #status-stats {
+    left: 0;
+    right: 0;
+    justify-content: center;
+  }
+  #gen-tree-body #status-stats .st-sep,
+  #gen-tree-body #status-stats .st-lbl ~ .st-lbl,
+  #gen-tree-body #status-stats .st-val ~ .st-val {
+    display: none !important;
+  }
+  /* Export / download dialogs: keep them inside the tree card on the right rail
+     (PearTree defaults to position:fixed over the whole viewport, which collides
+     with the full-bleed map). absolute + inset pins them to #gen-tree-body. */
+  #gen-tree-body .pt-modal {
+    color: #2a2a27; --bs-body-color: #2a2a27; --bs-secondary-color: rgba(42,42,39,0.62);
+    max-width: min(480px, calc(100% - 24px)) !important;
+    max-height: calc(100% - 24px) !important;
+  }
+  #gen-tree-body .pt-modal-overlay,
+  #gen-tree-body #confirm-dialog-overlay,
+  #gen-tree-body #prompt-dialog-overlay {
+    position: absolute !important;
+    inset: 0 !important;
+    z-index: 40 !important;
+  }
   /* Zone-colour legend: an overlay in the tree area's top-right, toggled by the
      Legend button. Built from the same palette map the tips use (genomic.js). */
   /* Overlay in the tree area's top-LEFT, below the PearTree toolbar. `top` and

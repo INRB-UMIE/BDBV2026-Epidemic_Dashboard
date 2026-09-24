@@ -284,6 +284,10 @@ function applyStaticI18n() {
     if (el.id === "context-body" && contextSelectedNom) return;
     el.textContent = val;
   });
+  // Trusted locale HTML (e.g. genomic intro with an external link). Locale YAML only.
+  document.querySelectorAll("[data-i18n-html]").forEach(function(el) {
+    el.innerHTML = t(el.getAttribute("data-i18n-html"));
+  });
   document.querySelectorAll("[data-i18n-aria]").forEach(function(el) {
     el.setAttribute("aria-label", t(el.getAttribute("data-i18n-aria")));
   });
@@ -574,6 +578,10 @@ function setLang(lang) {
     updateEpiMetaNotes();
     renderEpiLegendBars();
     renderEpiTrendsTable();
+  } else if (activeView === "genomic-epidemiology") {
+    if (window.__genomicTab && typeof window.__genomicTab.refreshI18n === "function") {
+      window.__genomicTab.refreshI18n();
+    }
   } else {
     // Map view: re-render the focused zone's info box (or the placeholder) in
     // the new language. applyStaticI18n early-returns for a non-empty info box,

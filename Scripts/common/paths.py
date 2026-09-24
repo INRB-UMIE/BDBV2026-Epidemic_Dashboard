@@ -62,6 +62,27 @@ GENOMIC_DIR = Path(
     os.environ.get("GENOMIC_DIR") or
     (SCRIPT_DIR.parent.parent / "BDBV2026-Genomic_Epi" / "public" / "data")
 ).resolve()
+# Dated HIPSTR/BEAST tree drops from BDBV2026-Phylogenetic_Analyses
+# (data/phylogenies/<date>/). Override with PHYLOGENIES_DIR. The genomic loader
+# also considers trees under BEAST_NE_DIR and picks the newest folder name.
+# Ne curves come from BEAST_NE_DIR (same sibling repo);
+# GENOMIC_DIR remains a fallback for legacy Genomic_Epi products only.
+PHYLOGENIES_DIR = Path(
+    os.environ.get("PHYLOGENIES_DIR") or
+    (SCRIPT_DIR.parent.parent / "BDBV2026-Phylogenetic_Analyses" / "data" / "phylogenies")
+).resolve()
+# BEAST Ne trajectory exports (SkyGrid / exponential) under outputs/beast/<date>/.
+# Override with BEAST_NE_DIR.
+BEAST_NE_DIR = Path(
+    os.environ.get("BEAST_NE_DIR") or
+    (SCRIPT_DIR.parent.parent / "BDBV2026-Phylogenetic_Analyses" / "outputs" / "beast")
+).resolve()
+# Daily confirmed cases for the genomic tab (cases vs genomes / correlation),
+# from BDBV2026-Phylogenetic_Analyses. Override with ROLLING_POSITIVITY_CSV.
+ROLLING_POSITIVITY_CSV = Path(
+    os.environ.get("ROLLING_POSITIVITY_CSV") or
+    (SCRIPT_DIR.parent.parent / "BDBV2026-Phylogenetic_Analyses" / "data" / "rolling_positivity.csv")
+).resolve()
 SIT_REPS_DIR     = DATA_ROOT / "Epidemiological Data"
 METHODS_DOCX     = DATA_ROOT / "Methods" / "Contributors_Methods_Data_website.docx"
 METHODS_DOCX_FR  = DATA_ROOT / "Methods" / "Contributors_Methods_Data_website_fr.docx"

@@ -41,8 +41,11 @@ from common.paths import (
     CAVEATS_CSV, INVASION_RISK_CSV, DASHBOARD_PLOTS_DIR, SIT_REPS_DIR,
     METHODS_DOCX, METHODS_DOCX_FR, METHODS_HTML_FR, TERMS_TXT, TERMS_TXT_FR,
     BRANDING_DIR, BRANDING_URLS, THEME_CSS, LOCALES_DIR, SUPPORTED_LANGS,
-    OUTPUT_DIR, GENOMIC_DIR,
+    OUTPUT_DIR, GENOMIC_DIR, PHYLOGENIES_DIR, BEAST_NE_DIR,
+    ROLLING_POSITIVITY_CSV,
 )
+from common.phylo_tree import prepare_phylo_tree_products, resolve_latest_phylogeny_tree
+from common.beast_ne import load_beast_ne_products, ne_stale_relative_to_tree
 
 # `from common.data_sources import *` (used by common/payload.py) only pulls
 # in names that don't start with an underscore *unless* __all__ is defined --
@@ -233,6 +236,7 @@ __all__ = [
     'load_genomic_products',
     'canonicalize_genomic_zones',
     'load_onset_imputed_series',
+    'load_rolling_positivity_case_series',
 ]
 
 # ---------------------------------------------------------------------------
@@ -4209,27 +4213,89 @@ def load_data_build_info() -> dict | None:
     }
 
 
-def load_genomic_products(genomic_dir=None):
-    """Load the BDBV2026-Genomic_Epi products into a payload slice.
+def _load_genomic_sidecars(genomic_dir: Path, tip_count: int) -> dict:
+    """Load Ne sidecars from GENOMIC_DIR when present and tip counts agree."""
+    meta_path = genomic_dir / "ituri-meta.json"
+    if not meta_path.exists():
+        return {}
+    meta = json.loads(meta_path.read_text(encoding="utf-8"))
+    if int(meta.get("tipCount") or 0) != tip_count:
+        print(f"  genomic sidecars: skipped (Genomic_Epi tipCount "
+              f"{meta.get('tipCount')} != phylo tree {tip_count})")
+        return {}
+    out = {}
+    for key, fname in (("skygrid", "skygrid.json"), ("exponential", "exponential.json")):
+        path = genomic_dir / fname
+        if path.exists():
+            out[key] = json.loads(path.read_text(encoding="utf-8"))
+    return out
 
-    Returns {} when the sibling repo isn't present, so a build without it stays
-    green (the genomic tab is a stub until later phases wire it up). The tree is
-    returned as inline NEXUS text (PearTree's embed accepts it under the `tree`
-    key), so it needs no separate fetched asset.
+
+def _attach_ne_products(products: dict, genomic_dir: Path, beast_dir: Path | None = None) -> dict:
+    """Merge SkyGrid / exponential Ne curves onto a genomic products dict.
+
+    Prefer the latest dated drop under ``BEAST_NE_DIR``. If that drop is older
+    than the phylogeny folder date, keep the Ne curves and set ``ne_stale`` so
+    the UI can show a translated caveat. Fall back to Genomic_Epi sidecars only
+    when no BEAST Ne files are present.
     """
+    beast = load_beast_ne_products(beast_dir if beast_dir is not None else BEAST_NE_DIR)
+    if beast:
+        for key in ("skygrid", "exponential"):
+            if key in beast:
+                products[key] = beast[key]
+        products["ne_folder_date"] = beast.get("ne_folder_date")
+        products["ne_source_dir"] = beast.get("ne_source_dir")
+        tree_date = (products.get("meta") or {}).get("updated")
+        if ne_stale_relative_to_tree(beast.get("ne_folder_date"), tree_date):
+            products["ne_stale"] = True
+            print(f"  genomic Ne: {beast.get('ne_folder_date')} "
+                  f"(stale vs tree {tree_date})")
+        else:
+            print(f"  genomic Ne: {beast.get('ne_folder_date')} "
+                  f"(skygrid={'skygrid' in beast}, exp={'exponential' in beast})")
+        return products
+
+    products.update(_load_genomic_sidecars(genomic_dir, len(products.get("tips", []))))
+    return products
+
+
+def load_genomic_products(genomic_dir=None, phylogenies_dir=None, beast_ne_dir=None):
+    """Load genomic-tab products into a payload slice.
+
+    Tree/tips/meta come from the newest dated ``YYYY-MM-DD`` folder that
+    contains a ``.tree``, searching ``PHYLOGENIES_DIR`` and ``BEAST_NE_DIR``
+    (BEAST drops may ship the display tree next to Ne curves). SkyGrid /
+    exponential Ne curves come from the latest dated folder under
+    ``BEAST_NE_DIR`` (converted from Tracer ``*.ne.txt`` / legacy skygrid TSV).
+    When the phylogeny folder is newer than the Ne folder, the latest Ne is
+    still used and ``ne_stale`` is set for the UI (translated client-side).
+
+    Falls back to the legacy Genomic_Epi bundle when no phylo tree is found.
+    Returns {} when neither source is present (build stays green).
+    """
+    phylo_base = Path(phylogenies_dir) if phylogenies_dir is not None else PHYLOGENIES_DIR
     d = Path(genomic_dir) if genomic_dir is not None else GENOMIC_DIR
+    beast = Path(beast_ne_dir) if beast_ne_dir is not None else BEAST_NE_DIR
+    phylo_path = resolve_latest_phylogeny_tree(phylo_base, beast)
+    if phylo_path is not None:
+        products = prepare_phylo_tree_products(phylo_path)
+        if products:
+            print(f"  genomic tree: {phylo_path} ({len(products.get('tips', []))} tips)")
+            return _attach_ne_products(products, d, beast)
+
     tree_path = d / "ituri-tree.ptree"
     if not tree_path.exists():
         return {}
     meta = json.loads((d / "ituri-meta.json").read_text(encoding="utf-8"))
-    return {
+    print(f"  genomic tree: Genomic_Epi fallback ({meta.get('tipCount')} tips)")
+    products = {
         "tree": tree_path.read_text(encoding="utf-8"),
         "tips": json.loads((d / "ituri-tips.json").read_text(encoding="utf-8")),
         "meta": meta,
-        "skygrid": json.loads((d / "skygrid.json").read_text(encoding="utf-8")),
-        "exponential": json.loads((d / "exponential.json").read_text(encoding="utf-8")),
         "data_build_date": meta.get("updated"),
     }
+    return _attach_ne_products(products, d, beast)
 
 
 def canonicalize_genomic_zones(genomic: dict, known_noms) -> dict:
@@ -4380,5 +4446,76 @@ def load_onset_imputed_series(outputs_dir=None, known_noms=None, tree_most_recen
         "beyond_tree_from": tree_most_recent,
         "source": path.parent.name,
     }
+
+
+def load_rolling_positivity_case_series(
+    csv_path=None, known_noms=None, tree_most_recent=None,
+):
+    """Build genomic ``onset_distribution``-shaped case counts from rolling positivity.
+
+    Reads ``confirmed_case`` from BDBV2026-Phylogenetic_Analyses
+    ``data/rolling_positivity.csv`` (health-zone and national rows). Counts are
+    stored under ``observed`` with ``imputed`` always 0 so the existing genomic
+    time-series and cases-vs-genomes charts keep working without an imputed split.
+
+    Returns {} when the CSV is missing.
+    """
+    path = Path(csv_path) if csv_path is not None else ROLLING_POSITIVITY_CSV
+    if not path.is_file():
+        return {}
+    nom_by_norm = {_norm(n): n for n in (known_noms or ())}
+
+    def canon(name: str) -> str:
+        name = (name or "").strip()
+        if not name or name.upper() == "NA":
+            return name
+        return nom_by_norm.get(_norm(name), name)
+
+    by_zone: dict = {}
+    national: dict = {}
+    with open(path, newline="", encoding="utf-8") as fh:
+        for row in csv.DictReader(fh):
+            scale = (row.get("spatial_scale") or "").strip().lower()
+            d = (row.get("date_of_symptom_onset_imputed") or "").strip()
+            if not _ONSET_DATE_RE.match(d):
+                continue
+            try:
+                n = int(float(row.get("confirmed_case") or 0))
+            except (TypeError, ValueError):
+                continue
+            if n < 0:
+                continue
+            if scale == "healthzone":
+                z = canon(row.get("health_zone") or "")
+                if not z or z.upper() == "NA":
+                    continue
+                bucket = by_zone.setdefault(z, {}).setdefault(
+                    d, {"observed": 0, "imputed": 0},
+                )
+                bucket["observed"] += n
+            elif scale == "national":
+                bucket = national.setdefault(d, {"observed": 0, "imputed": 0})
+                bucket["observed"] += n
+
+    # If national rows are absent, fall back to summing health-zone counts.
+    if not national and by_zone:
+        for series in by_zone.values():
+            for d, counts in series.items():
+                bucket = national.setdefault(d, {"observed": 0, "imputed": 0})
+                bucket["observed"] += counts.get("observed", 0)
+
+    if not national and not by_zone:
+        return {}
+    return {
+        "dates": sorted(national) if national else sorted({
+            d for series in by_zone.values() for d in series
+        }),
+        "national": national,
+        "by_zone": by_zone,
+        "beyond_tree_from": tree_most_recent,
+        "source": "rolling_positivity",
+        "case_source": "rolling_positivity.confirmed_case",
+    }
+
 
 
