@@ -20,6 +20,10 @@ _TIP_NAME_RE = re.compile(
 _HEIGHT_MEDIAN_RE = re.compile(r"height_median=([0-9.eE+-]+)")
 _ISO_DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 _YM_DATE_RE = re.compile(r"^\d{4}-\d{2}$")
+# TreeAnnotator emits ``height_95.0%_HPD``; PearTree's node-bar schema only
+# groups suffixes matching ``_95%_HPD`` (no decimal). Rewrite so bars bind to
+# the 95% height HPD interval from the input tree.
+_HPD_PCT_DOT_ZERO_RE = re.compile(r"_(\d+)\.0%_HPD\b")
 
 # Prefer EGC trees when present; otherwise SG / hipstrCA / any .tree.
 # Dated BEAST drops (outputs/beast/<date>/) increasingly ship the display tree
@@ -150,6 +154,11 @@ def prepare_phylo_tree_products(tree_path: Path) -> dict:
         )
 
     tree = _TIP_NAME_RE.sub(_replace_tip, raw)
+    # Map BEAST ``height_95.0%_HPD`` (and siblings like ``height_50.0%_HPD``)
+    # onto PearTree's expected ``_95%_HPD`` / ``_50%_HPD`` suffix form. Node
+    # bars read ``annotationSchema.get("height").group.hpd``, which only
+    # resolves when the key ends with ``_95%_HPD``.
+    tree = _HPD_PCT_DOT_ZERO_RE.sub(r"_\1%_HPD", tree)
     # PearTree accepts both casings; normalise to the producer convention.
     if "BEGIN TREES" not in tree and "Begin trees" in tree:
         tree = tree.replace("Begin trees;", "BEGIN TREES;").replace("End;", "END;")

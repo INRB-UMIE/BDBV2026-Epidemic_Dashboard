@@ -41,6 +41,30 @@ def test_prepare_phylo_tree_products_adds_dashboard_annotations(tmp_path):
     assert 'accession="PP_006XHKB.2"' in out["tree"]
 
 
+def test_prepare_phylo_tree_products_maps_beast_height_95_hpd_for_peartree(tmp_path):
+    """BEAST TreeAnnotator uses height_95.0%_HPD; PearTree node bars need _95%_HPD."""
+    nexus = (
+        "#NEXUS\nBegin trees;\n"
+        "tree TREE1 = [&R] (('26FHV045|PP_006XHKB.2|DRC|Ituri|Bunia|2026-05-03':0.1,"
+        "'26FHV058|PP_006Y8ME.2|DRC|Ituri|Katwa|2026-05-06':0.2)"
+        "[&height_mean=0.2,height_median=0.19,height_range={0.1,0.3},"
+        "height_50.0%_HPD={0.15,0.22},height_95.0%_HPD={0.12,0.28},"
+        "rate_95%_HPD={0.05,0.2}]:0.3);\n"
+        "End;\n"
+    )
+    tree_path = tmp_path / "2026-09-01" / "demo.hipstr.tree"
+    tree_path.parent.mkdir(parents=True)
+    tree_path.write_text(nexus, encoding="utf-8")
+    out = phylo.prepare_phylo_tree_products(tree_path)
+    tree = out["tree"]
+    assert "height_95.0%_HPD" not in tree
+    assert "height_50.0%_HPD" not in tree
+    assert "height_95%_HPD={0.12,0.28}" in tree
+    assert "height_50%_HPD={0.15,0.22}" in tree
+    # Non-``.0`` HPD keys (e.g. rate) are already PearTree-shaped — leave alone.
+    assert "rate_95%_HPD={0.05,0.2}" in tree
+
+
 def test_load_genomic_products_uses_phylo_tree(tmp_path, monkeypatch):
     phylo_dir = tmp_path / "phy"
     gen_dir = tmp_path / "gen"
