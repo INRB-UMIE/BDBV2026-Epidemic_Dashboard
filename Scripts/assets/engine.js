@@ -1071,6 +1071,7 @@ function renderFlowArcs(hubNom, layer) {
     return;
   }
 
+  let inDrawn = 0;
   inSorted.forEach(function(pair) {
     const origin = pair[0];
     const count = pair[1];
@@ -1078,6 +1079,21 @@ function renderFlowArcs(hubNom, layer) {
     if (!start) return;
     const cases = zoneConfirmedCases(origin);
     const pressure = useImportPressure ? importationPressure(origin, count) : count;
+    // No cases in the origin -> no importation pressure -> no arrow. This path
+    // is the fallback for destinations the Bayesian model does not cover, and
+    // it drew an edge for EVERY mobility inflow: flowArcWeightNormalized(0)
+    // returns a 1.2px floor, so a zero-pressure origin still got a visible
+    // arrow. On the 60 zones that fall back, 362 of 1194 arrows (30%) came
+    // from zones with no confirmed cases -- every single one of Bokoro's 15.
+    // The legend states width is proportional to each origin's import-force
+    // contribution, so a zero-contribution arrow asserts risk that the metric
+    // itself puts at zero.
+    //
+    // Skipped rather than drawn at weight 0: a zero-weight polyline would still
+    // carry its chevron wing marker, leaving a visible arrowhead with no line.
+    // importationPressure() already returns 0 for the no-movement case; this
+    // completes the same rule for the no-cases case.
+    if (useImportPressure && !(pressure > 0)) return;
     const weight = useImportPressure
       ? flowArcWeightNormalized(maxMetric > 0 ? pressure / maxMetric : 0)
       : flowArcWeight(count, maxMetric);
@@ -1109,13 +1125,16 @@ function renderFlowArcs(hubNom, layer) {
     line.on("click", forwardArcClickToZone);
     line.addTo(flowArcLayer);
     addFlowWingMarker(pts, color, useImportPressure ? {nearEnd: true} : null);
+    inDrawn++;
   });
 
   flowArcStats = {
     outTotal: outs.length,
     outShown: useImportPressure ? 0 : outSorted.length,
     inTotal: ins.length,
-    inShown: inSorted.length,
+    // What was actually drawn, not what was offered: zero-pressure origins are
+    // skipped above, so inSorted.length would over-report the arrows on screen.
+    inShown: inDrawn,
     metric: useImportPressure ? "importation_pressure" : "persons",
     maxMetric: maxMetric,
   };
