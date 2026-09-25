@@ -126,11 +126,7 @@ __all__ = [
     '_parse_ic_model_scalar',
     'load_ic_model_estimates',
     '_slugify_plot_key',
-    '_read_plot_svg',
-    '_svg_plot_title',
-    '_load_lab_name_map',
-    '_lab_label_from_stem',
-    'load_dashboard_plots',
+    'load_trends_series',
     '_parse_optional_float',
     '_parse_optional_int',
     '_parse_boolish',
@@ -1279,426 +1275,6 @@ def _slugify_plot_key(text: str) -> str:
     text = text.lower()
     text = re.sub(r"[^a-z0-9]+", "-", text)
     return text.strip("-")
-
-
-def _read_plot_svg(path: Path) -> str | None:
-    if not path.exists():
-        return None
-    svg = path.read_text(encoding="utf-8").strip()
-    if svg.startswith("<?xml"):
-        svg = svg.split("?>", 1)[-1].strip()
-    return svg or None
-
-
-def _svg_plot_title(svg: str, fallback: str) -> str:
-    # Require a "- <place>" suffix so we match the real chart title rather than
-    # a legend/series label that happens to repeat the same base phrase earlier
-    # in the SVG markup (e.g. rolling_positivity's "5-day Rolling Test
-    # Positivity" legend entry, which has no place suffix and appears before
-    # the actual title).
-    for prefix in (
-        "Daily Cases by Symptom Onset",
-        "Cumulative Confirmed Deaths",
-        "5-day Rolling Test Positivity",
-    ):
-        match = re.search(
-            r">\s*(" + re.escape(prefix) + r"\s*-\s*[^<]+?)\s*<",
-            svg,
-            flags=re.I,
-        )
-        if match:
-            return re.sub(r"\s+", " ", match.group(1)).strip()
-    return fallback
-
-
-def _load_lab_name_map() -> dict[str, str]:
-    """Map lab plot keys / codes to display labels."""
-    path = DASHBOARD_PLOTS_DIR / "lab_name_map.csv"
-    out: dict[str, str] = {}
-    if not path.exists():
-        return out
-    try:
-        df = pd.read_csv(path)
-    except Exception as exc:  # noqa: BLE001
-        print(f"  WARNING: could not read {path.name}: {exc}")
-        return out
-    if df.shape[1] < 2:
-        return out
-    key_col, val_col = df.columns[0], df.columns[1]
-    for _, row in df.iterrows():
-        key = str(row.get(key_col) or "").strip()
-        val = str(row.get(val_col) or "").strip()
-        if not key or not val:
-            continue
-        out[_slugify_plot_key(key)] = val
-        out[_slugify_plot_key(key.replace(" ", ""))] = val
-        out[key.upper()] = val
-    return out
-
-
-def _lab_label_from_stem(stem: str, name_map: dict[str, str]) -> str:
-    raw = stem[4:] if stem.lower().startswith("lab_") else stem
-    slug = _slugify_plot_key(raw)
-    if slug in name_map:
-        return name_map[slug]
-    compact = slug.replace("-", "")
-    if compact in name_map:
-        return name_map[compact]
-    upper = raw.upper().replace("_", "-")
-    if upper in name_map:
-        return name_map[upper]
-    # Fall back to the plot-name token (e.g. inrbk → INRBK).
-    return re.sub(r"[-_]+", "-", raw).upper()
-
-
-def _lab_code_from_stem(stem: str, manifest_labs: dict) -> str | None:
-    """Match a lab_*.svg stem back to the manifest lab_code (e.g. lab_lpspbn → LPSPBN)."""
-    raw = stem[4:] if stem.lower().startswith("lab_") else stem
-    for suffix in ("_samples", "_positivity"):
-        if raw.endswith(suffix):
-            raw = raw[: -len(suffix)]
-            break
-    slug = _slugify_plot_key(raw)
-    for code in manifest_labs:
-        if _slugify_plot_key(code) == slug:
-            return code
-    return None
-
-
-def _load_plot_type_family(
-    type_dir: Path,
-    filename_prefix: str,
-    national_title_default: str,
-    label_title_fmt: str,
-    province_by_slug: dict[str, str],
-    nom_by_slug: dict[str, str],
-    manifest_meta: dict,
-) -> tuple[dict | None, dict[str, dict], dict[str, dict]]:
-    """Load one plot type's national/province/health-zone SVGs from
-    ``type_dir`` (already resolved to e.g. .../confirmed_cases_and_positivity
-    or .../cumulative_deaths).
-
-    Handles both the current layout (national/provincial/healthzone
-    subfolders under type_dir) and the older flat layout (files directly in
-    type_dir, health zones under a bare "healthzone" subfolder). Province
-    entries missing from disk are filled in from ``manifest_meta``
-    (province -> {file, title, caption}), matching load_dashboard_plots'
-    manifest handling.
-    """
-    national = None
-    national_path = type_dir / "national" / f"{filename_prefix}national.svg"
-    if not national_path.exists():
-        national_path = type_dir / f"{filename_prefix}national.svg"
-    nat_svg = _read_plot_svg(national_path)
-    if nat_svg:
-        national = {
-            "id": "national",
-            "label": "National",
-            "file": str(national_path.relative_to(DASHBOARD_PLOTS_DIR)),
-            "title": _svg_plot_title(nat_svg, national_title_default),
-            "caption": "",
-            "svg": nat_svg,
-        }
-
-    provincial_dir = type_dir / "provincial"
-    if not provincial_dir.exists():
-        provincial_dir = type_dir
-    province_plots: dict[str, dict] = {}
-    for svg_path in sorted(provincial_dir.glob(f"{filename_prefix}*.svg")):
-        slug = svg_path.stem.removeprefix(filename_prefix)
-        if slug == "national":
-            continue
-        svg = _read_plot_svg(svg_path)
-        if not svg:
-            continue
-        label = province_by_slug.get(slug) or slug.replace("-", " ").title()
-        province_plots[label] = {
-            "id": label,
-            "label": label,
-            "slug": slug,
-            "file": str(svg_path.relative_to(DASHBOARD_PLOTS_DIR)),
-            "title": _svg_plot_title(svg, label_title_fmt.format(label=label)),
-            "caption": "",
-            "svg": svg,
-        }
-
-    # Manifest entries fill gaps only (province not already found on disk).
-    for province, meta in (manifest_meta or {}).items():
-        if not isinstance(meta, dict) or province in province_plots:
-            continue
-        filename = meta.get("file")
-        if not filename:
-            continue
-        svg_path = DASHBOARD_PLOTS_DIR / filename
-        svg = _read_plot_svg(svg_path)
-        if not svg:
-            continue
-        province_plots[province] = {
-            "id": province,
-            "label": province,
-            "slug": _slugify_plot_key(province),
-            "file": filename,
-            "title": meta.get("title") or label_title_fmt.format(label=province),
-            "caption": meta.get("caption") or "",
-            "svg": svg,
-        }
-
-    hz_plots: dict[str, dict] = {}
-    hz_dir = type_dir / "healthzone"
-    if hz_dir.exists():
-        for svg_path in sorted(hz_dir.glob(f"{filename_prefix}*.svg")):
-            slug = svg_path.stem.removeprefix(filename_prefix)
-            svg = _read_plot_svg(svg_path)
-            if not svg:
-                continue
-            nom = nom_by_slug.get(slug) or slug.replace("-", " ").title()
-            hz_plots[nom] = {
-                "id": nom,
-                "label": nom,
-                "slug": slug,
-                "file": str(svg_path.relative_to(DASHBOARD_PLOTS_DIR)),
-                "title": _svg_plot_title(svg, label_title_fmt.format(label=nom)),
-                "caption": "",
-                "svg": svg,
-            }
-
-    return national, province_plots, hz_plots
-
-
-# Pre-built onset / lab plots for the Epidemiological trends panel.
-def load_dashboard_plots(
-    zone_noms: list[str] | None = None,
-    provinces: list[str] | None = None,
-) -> dict | None:
-    """Load national, province, health-zone, and lab SVG plots.
-
-    Two on-disk layouts are supported, auto-detected via manifest.json's
-    top-level "date" field.
-
-    Current (per-date, split by plot type then spatial scope)::
-
-        dashboard_plots/
-          manifest.json                              (has a "date")
-          <date>/dashboard_plots/
-            confirmed_cases_and_positivity/
-              national/daily_onset_national.svg
-              provincial/daily_onset_<province>.svg
-              healthzone/daily_onset_<zone>.svg
-            lab_plots/lab_<code>.svg
-
-    Older, flat layout (used whenever the dated/typed folder above isn't
-    found -- e.g. manifest.json has no "date", or local test data)::
-
-        dashboard_plots/
-          daily_onset_<province>.svg
-          national/daily_onset_national.svg
-          healthzone/daily_onset_<zone>.svg
-          lab/lab_<code>.svg
-          lab_name_map.csv   (optional)
-
-    manifest.json province plots are read from
-    ``plots.confirmed_cases_and_positivity.<province>`` and
-    ``plots.cumulative_deaths.<province>`` (the whole ``plots`` dict is
-    treated as the confirmed-cases entries for older manifests that predate
-    the plot-type nesting) and only used to fill gaps left by the
-    ``daily_onset_*.svg`` / ``cumulative_deaths_*.svg`` globs below.
-
-    The data repo also produces a parallel "cumulative_deaths" plot type
-    alongside "confirmed_cases_and_positivity" (same national/provincial/
-    healthzone split, no lab plots); it's returned under the
-    ``cumulative_deaths`` key.
-
-    ``manifest.indexes`` (``by_health_zone`` / ``by_province``) is passed
-    through for location-based lab subsetting, and each lab entry is
-    enriched from ``manifest.plots.lab_plots`` with ``lab_code``,
-    ``health_zone``, and ``province``.
-    """
-    if not DASHBOARD_PLOTS_DIR.exists():
-        print(f"  NOTE: {DASHBOARD_PLOTS_DIR} not found; trends plots unavailable")
-        return None
-
-    manifest: dict = {}
-    manifest_path = DASHBOARD_PLOTS_DIR / "manifest.json"
-    if manifest_path.exists():
-        try:
-            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-        except json.JSONDecodeError as exc:
-            print(f"  WARNING: invalid {manifest_path.name}: {exc}")
-
-    # Resolve the actual plots base dir: <DASHBOARD_PLOTS_DIR>/<date>/dashboard_plots
-    # when manifest.json points at one and it exists on disk, else fall back
-    # to the older flat layout directly under DASHBOARD_PLOTS_DIR.
-    manifest_date = manifest.get("date")
-    plots_base = DASHBOARD_PLOTS_DIR
-    if manifest_date:
-        dated_base = DASHBOARD_PLOTS_DIR / str(manifest_date) / "dashboard_plots"
-        if dated_base.exists():
-            plots_base = dated_base
-
-    # Within plots_base, each plot type lives under its own folder in the
-    # current layout; older data has confirmed-cases plots directly in
-    # plots_base with no plot-type wrapper (and no cumulative_deaths at all).
-    cases_dir = plots_base / "confirmed_cases_and_positivity"
-    if not cases_dir.exists():
-        cases_dir = plots_base
-    deaths_dir = plots_base / "cumulative_deaths"
-    positivity_dir = plots_base / "rolling_positivity"
-    # Lab plots' folder was renamed lab -> lab_plots.
-    lab_dir = plots_base / "lab_plots"
-    if not lab_dir.exists():
-        lab_dir = plots_base / "lab"
-
-    zone_noms = list(zone_noms or [])
-    provinces = list(provinces or [])
-    nom_by_slug = {_slugify_plot_key(n): n for n in zone_noms if n}
-    province_by_slug = {_slugify_plot_key(p): p for p in provinces if p}
-
-    manifest_plots = manifest.get("plots") or {}
-    cases_meta = manifest_plots.get("confirmed_cases_and_positivity")
-    if not isinstance(cases_meta, dict):
-        cases_meta = manifest_plots  # older, pre-plot-type-nesting manifest shape
-    deaths_meta = manifest_plots.get("cumulative_deaths")
-    if not isinstance(deaths_meta, dict):
-        deaths_meta = {}
-    positivity_meta = manifest_plots.get("rolling_positivity")
-    if not isinstance(positivity_meta, dict):
-        positivity_meta = {}
-
-    national, province_plots, hz_plots = _load_plot_type_family(
-        cases_dir, "daily_onset_",
-        "Daily Cases by Symptom Onset - National",
-        "Daily Cases by Symptom Onset - {label}",
-        province_by_slug, nom_by_slug, cases_meta,
-    )
-
-    deaths_national: dict | None = None
-    deaths_province_plots: dict[str, dict] = {}
-    deaths_hz_plots: dict[str, dict] = {}
-    if deaths_dir.exists():
-        deaths_national, deaths_province_plots, deaths_hz_plots = _load_plot_type_family(
-            deaths_dir, "cumulative_deaths_",
-            "Cumulative Confirmed Deaths - National",
-            "Cumulative Confirmed Deaths - {label}",
-            province_by_slug, nom_by_slug, deaths_meta,
-        )
-
-    positivity_national: dict | None = None
-    positivity_province_plots: dict[str, dict] = {}
-    positivity_hz_plots: dict[str, dict] = {}
-    if positivity_dir.exists():
-        positivity_national, positivity_province_plots, positivity_hz_plots = _load_plot_type_family(
-            positivity_dir, "rolling_positivity_",
-            "5-day Rolling Test Positivity - National",
-            "5-day Rolling Test Positivity - {label}",
-            province_by_slug, nom_by_slug, positivity_meta,
-        )
-
-    lab_name_map = _load_lab_name_map()
-    manifest_labs = manifest_plots.get("lab_plots")
-    if not isinstance(manifest_labs, dict):
-        manifest_labs = {}
-    labs: list[dict] = []
-    if manifest_labs:
-        for lab_code, meta in manifest_labs.items():
-            if not isinstance(meta, dict):
-                continue
-            plot_file = meta.get("file")
-            if not plot_file:
-                continue
-            svg = _read_plot_svg(DASHBOARD_PLOTS_DIR / plot_file)
-            if not svg:
-                continue
-            label = meta.get("lab_name_long") or lab_code
-            lab_id = f"lab_{_slugify_plot_key(lab_code)}"
-            labs.append({
-                "id": lab_id,
-                "lab_code": lab_code,
-                "label": label,
-                "slug": _slugify_plot_key(lab_code),
-                "health_zone": meta.get("health_zone"),
-                "province": meta.get("province"),
-                "file": plot_file,
-                "title": meta.get("title") or _svg_plot_title(
-                    svg, f"Samples Analysed and Test Positivity — {label}"
-                ),
-                "caption": meta.get("caption") or "",
-                "svg": svg,
-            })
-    elif lab_dir.exists():
-        for svg_path in sorted(lab_dir.glob("lab_*.svg")):
-            if svg_path.stem.endswith(("_samples", "_positivity")):
-                continue
-            svg = _read_plot_svg(svg_path)
-            if not svg:
-                continue
-            lab_id = svg_path.stem  # lab_inrbk
-            lab_code = _lab_code_from_stem(lab_id, manifest_labs)
-            meta = manifest_labs.get(lab_code) if lab_code else {}
-            if not isinstance(meta, dict):
-                meta = {}
-            label = meta.get("lab_name_long") or _lab_label_from_stem(lab_id, lab_name_map)
-            plot_title = meta.get("title") or _svg_plot_title(
-                svg, f"Samples Analysed and Test Positivity — {label}"
-            )
-            labs.append({
-                "id": lab_id,
-                "lab_code": lab_code or meta.get("lab_code"),
-                "label": label,
-                "slug": _slugify_plot_key(lab_id.removeprefix("lab_")),
-                "health_zone": meta.get("health_zone"),
-                "province": meta.get("province"),
-                "file": str(svg_path.relative_to(DASHBOARD_PLOTS_DIR)),
-                "title": plot_title,
-                "caption": meta.get("caption") or "",
-                "svg": svg,
-            })
-    if labs:
-        labs.sort(key=lambda x: str(x["label"]).lower())
-
-    if (not national and not province_plots and not hz_plots and not labs
-            and not deaths_national and not deaths_province_plots and not deaths_hz_plots
-            and not positivity_national and not positivity_province_plots and not positivity_hz_plots):
-        print(f"  WARNING: no loadable plots under {plots_base.relative_to(DASHBOARD_PLOTS_DIR.parent)}/")
-        return None
-
-    print(
-        "  dashboard plots: "
-        + f"national={'yes' if national else 'no'}"
-        + f", {len(province_plots)} province(s)"
-        + f", {len(hz_plots)} health zone(s)"
-        + f", {len(labs)} lab(s)"
-        + f", deaths national={'yes' if deaths_national else 'no'}"
-        + f", deaths {len(deaths_province_plots)} province(s)"
-        + f", deaths {len(deaths_hz_plots)} health zone(s)"
-        + f", positivity national={'yes' if positivity_national else 'no'}"
-        + f", positivity {len(positivity_province_plots)} province(s)"
-        + f", positivity {len(positivity_hz_plots)} health zone(s)"
-        + f" from {plots_base.relative_to(DASHBOARD_PLOTS_DIR.parent)}/"
-    )
-    return {
-        "series": manifest.get("series") or [],
-        "incomplete_styling": manifest.get("incomplete_styling") or {},
-        "indexes": manifest.get("indexes") or {},
-        "national": national,
-        "provinces": province_plots,
-        # Backward-compatible alias used by older panel code.
-        "plots": province_plots,
-        "health_zones": hz_plots,
-        "labs": labs,
-        "labs_by_code": {
-            lab["lab_code"]: lab for lab in labs if lab.get("lab_code")
-        },
-        "cumulative_deaths": {
-            "national": deaths_national,
-            "provinces": deaths_province_plots,
-            "health_zones": deaths_hz_plots,
-        },
-        "rolling_positivity": {
-            "national": positivity_national,
-            "provinces": positivity_province_plots,
-            "health_zones": positivity_hz_plots,
-        },
-    }
 
 
 def _parse_optional_float(value) -> float | None:
@@ -4346,7 +3922,7 @@ def canonicalize_genomic_zones(genomic: dict, known_noms) -> dict:
     return genomic
 
 
-_ONSET_DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+_ISO_DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 # status_aggregated.csv is the SAME table the Trends tab's "Daily Cases by
 # Symptom Onset" SVG is rendered from (manifest.json's ``source_csv``). The
 # genomic panel reads its confirmed_case column so both charts show identical
@@ -4356,12 +3932,455 @@ _ONSET_DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 _STATUS_AGG_CSV_NAME = "status_aggregated.csv"
 
 
+# --- Trends series packers -------------------------------------------------
+# These reproduce BDBV2026-Processing_Code@main's 4-make-dashboard-plots.R
+# exactly; see docs/superpowers/specs/2026-09-22-trends-dynamic-charts-design.md
+# section 6. Do not "tidy" the asymmetries below -- cases ACCUMULATE duplicate
+# rows while deaths/positivity OVERWRITE (last row wins), and only cases skip
+# zero-total locations. That is what the generator does.
+
+_TRENDS_SCALES = (("national", None), ("province", "province"), ("healthzone", "health_zone"))
+_TRENDS_EPOCH = "2026-01-01"
+# Built once rather than per CSV row -- every packer looks a scale up in its
+# inner loop.
+_TRENDS_SCALE_MAP = dict(_TRENDS_SCALES)
+# Distinct from None, which is the *legitimate* key_field for the national
+# scale (national rows carry no location column).
+_UNKNOWN_SCALE = object()
+
+
+def _trends_loc(row, key_field):
+    """Location name for a row, or None when it should be dropped."""
+    if key_field is None:
+        return "national"
+    name = (row.get(key_field) or "").strip()
+    if not name or name.upper() == "NA":
+        return None
+    # Repair before canon(): a damaged name would not match any canonical nom,
+    # so it would survive as its own broken entry in the scope dropdown.
+    return _fix_mojibake(name)
+
+
+def _trends_scale_loc(row, canon):
+    """(scale, location) for a row, or None when the row should be skipped.
+
+    The part of every spatial packer's row loop that must stay IDENTICAL across
+    cases/deaths/positivity. What follows it in each packer -- accumulate vs
+    overwrite, the zero-total skip, the epoch trim -- deliberately differs and
+    is NOT shared. See the spec's section 6.
+    """
+    scale = (row.get("spatial_scale") or "").strip().lower()
+    key_field = _TRENDS_SCALE_MAP.get(scale, _UNKNOWN_SCALE)
+    if key_field is _UNKNOWN_SCALE:
+        return None
+    loc = _trends_loc(row, key_field)
+    if loc is None:
+        return None
+    if key_field == "health_zone":
+        # canon maps to canonical health-zone noms, so it applies to
+        # zones ONLY. Province names are a different namespace; several
+        # DRC provinces share a name with a health zone (Ituri, Tshopo,
+        # Kinshasa...), so running provinces through it would silently
+        # rewrite a province to a zone's spelling if the two ever drift.
+        loc = canon(loc)
+    return scale, loc
+
+
+def _i0(value):
+    """Integer count, with blank/NA/non-numeric read as 0.
+
+    Mirrors the generator's to_int(): R returns 0L for NULL/NA/empty rather
+    than erroring, so a blank count column means "no cases", not "crash".
+    _i() alone returns None for those, which would blow up the accumulators.
+    """
+    return _i(value) or 0
+
+
+def _day_range(start, end):
+    """Inclusive list of ISO dates from start to end."""
+    s = date.fromisoformat(start)
+    e = date.fromisoformat(end)
+    return [(s + timedelta(days=i)).isoformat() for i in range((e - s).days + 1)]
+
+
+def _pack_trends_cases(path, canon=None):
+    """{scale: {location: {start, obs[], imp[]}}} from status_aggregated.csv."""
+    canon = canon or (lambda s: s)
+    buckets = {scale: {} for scale, _ in _TRENDS_SCALES}
+    with open(path, newline="", encoding="utf-8") as fh:
+        for row in csv.DictReader(fh):
+            resolved = _trends_scale_loc(row, canon)
+            if resolved is None:
+                continue
+            scale, loc = resolved
+            day = (row.get("date_of_symptom_onset_imputed") or "").strip()
+            if not _ISO_DATE_RE.match(day):
+                continue
+            slot = "imp" if (row.get("onset_date_was_imputed") or "").strip().upper() == "TRUE" else "obs"
+            entry = buckets[scale].setdefault(loc, {}).setdefault(day, {"obs": 0, "imp": 0})
+            entry[slot] += _i0(row.get("confirmed_case"))   # ACCUMULATE
+
+    packed = {scale: {} for scale, _ in _TRENDS_SCALES}
+    for scale, by_loc in buckets.items():
+        for loc, by_day in by_loc.items():
+            if sum(v["obs"] + v["imp"] for v in by_day.values()) <= 0:
+                continue                                    # spec 6.1 skip rule
+            positives = [d for d, v in by_day.items() if v["obs"] + v["imp"] > 0]
+            in_epoch = [d for d in positives if d >= _TRENDS_EPOCH]
+            start = min(in_epoch or positives)
+            end = max(by_day)                               # trailing zeros KEPT
+            days = _day_range(start, end)
+            packed[scale][loc] = {
+                "start": start,
+                "obs": [by_day.get(d, {}).get("obs", 0) for d in days],
+                "imp": [by_day.get(d, {}).get("imp", 0) for d in days],
+            }
+    return packed
+
+
+def _pack_trends_deaths(path, canon=None):
+    """{scale: {location: {start, cum[], daily[]}}} from cumulative_positive_deaths.csv.
+
+    `daily` is carried in the payload because the chart draws a point ONLY on
+    days where daily_deaths > 0 (spec 6.3); it is not otherwise plotted.
+    """
+    canon = canon or (lambda s: s)
+    buckets = {scale: {} for scale, _ in _TRENDS_SCALES}
+    with open(path, newline="", encoding="utf-8") as fh:
+        for row in csv.DictReader(fh):
+            resolved = _trends_scale_loc(row, canon)
+            if resolved is None:
+                continue
+            scale, loc = resolved
+            day = (row.get("reporting_date") or "").strip()
+            if not _ISO_DATE_RE.match(day):
+                continue
+            # OVERWRITE, last row wins -- deliberately unlike _pack_trends_cases
+            buckets[scale].setdefault(loc, {})[day] = (
+                _i0(row.get("daily_deaths")), _i0(row.get("cumulative_deaths"))
+            )
+
+    packed = {scale: {} for scale, _ in _TRENDS_SCALES}
+    for scale, by_loc in buckets.items():
+        for loc, by_day in by_loc.items():
+            if not by_day:
+                continue                       # no zero-total skip: only "no rows at all"
+            days = _day_range(min(by_day), max(by_day))
+            cum, daily, last = [], [], 0
+            for d in days:
+                if d in by_day:
+                    daily.append(by_day[d][0])
+                    last = by_day[d][1]
+                else:
+                    daily.append(0)
+                # `last` is cumulative_deaths read verbatim per row (matching
+                # R's complete_cumulative_series(), which does
+                # `last_cum <- rows$cumulative_deaths[idx[i]]` rather than
+                # summing daily_deaths), so a downward data correction shows
+                # as a legitimate dip here, not a bug.
+                cum.append(last)               # carry forward
+            packed[scale][loc] = {"start": days[0], "cum": cum, "daily": daily}
+    return packed
+
+
+def _pack_trends_positivity(path, canon=None):
+    """{scale: {location: {dates[], mean[], lo[], hi[]}}} from rolling_positivity.csv.
+
+    SPARSE by design: only dates present in the CSV appear. The chart's line
+    connects straight across gaps (geom_line does); zero-filling here would
+    invent troughs that are not in the data.
+
+    Values are proportions at full precision. The x100 to percent happens at
+    render time so the stored numbers stay byte-identical to the source.
+    """
+    canon = canon or (lambda s: s)
+    buckets = {scale: {} for scale, _ in _TRENDS_SCALES}
+    with open(path, newline="", encoding="utf-8") as fh:
+        for row in csv.DictReader(fh):
+            resolved = _trends_scale_loc(row, canon)
+            if resolved is None:
+                continue
+            scale, loc = resolved
+            day = (row.get("date_of_symptom_onset_imputed") or "").strip()
+            if not _ISO_DATE_RE.match(day):
+                continue
+            trio = (
+                _parse_optional_float(row.get("daily_positivity_mean")),
+                _parse_optional_float(row.get("daily_positivity_lower")),
+                _parse_optional_float(row.get("daily_positivity_upper")),
+            )
+            if trio[0] is None:
+                continue
+            buckets[scale].setdefault(loc, {})[day] = trio   # OVERWRITE, last wins
+
+    packed = {scale: {} for scale, _ in _TRENDS_SCALES}
+    for scale, by_loc in buckets.items():
+        for loc, by_day in by_loc.items():
+            days = sorted(by_day)
+            packed[scale][loc] = {
+                "dates": days,
+                "mean": [by_day[d][0] for d in days],
+                "lo": [by_day[d][1] for d in days],
+                "hi": [by_day[d][2] for d in days],
+            }
+    return packed
+
+
+# Upstream has shipped lab names whose UTF-8 bytes were decoded with the wrong
+# codec before being written back out -- e.g. "Laboratoire Provincial de Sant√©
+# Publique de Bunia", where C3 A9 (e-acute) was read as MacRoman. The damage is
+# exactly reversible, and lab_name_long is the only free-text field the Trends
+# tab renders from this source.
+_MOJIBAKE_HINT = re.compile(r"[\u221a\u00c3]|\u00e2\u20ac")
+
+
+def _or_none(value):
+    """Blank, or the literal string "NA", -> None.
+
+    These CSVs are written by R, which renders a missing value as the two
+    characters NA. Read back in Python that is an ordinary truthy string, so it
+    silently beats any `or` fallback -- which is how a lab with no long name
+    came to be titled "NA" instead of falling back to its code. R's own
+    read.csv turns it back into a real NA, so the generator falls back
+    correctly; we have to do that explicitly.
+    """
+    text = (value or "").strip()
+    return None if not text or text.upper() == "NA" else text
+
+
+def _fix_mojibake(text):
+    """Undo a UTF-8 string that was decoded with the wrong codec.
+
+    The candidate codec is chosen by the damage signature, not by trying each
+    in turn: MacRoman and Latin-1 damage are bijective in BOTH directions, so a
+    round-trip check alone happily "repairs" Latin-1 damage with MacRoman and
+    yields a combining-mark soup that round-trips perfectly.
+
+    Two guards on top of that: the repair must remove the signature, and must
+    not introduce combining marks (which is what a wrong-codec repair produces).
+    A name that legitimately contains one of these characters fails both and is
+    returned untouched.
+    """
+    if not text:
+        return text
+    codecs = []
+    if "\u221a" in text:                              # MacRoman: e-acute -> "\u221a\u00a9"
+        codecs.append("mac_roman")
+    if "\u00c3" in text or "\u00e2\u20ac" in text:  # Latin-1 / cp1252
+        codecs += ["cp1252", "latin-1"]
+    if not codecs:
+        return text
+    for codec in codecs:
+        try:
+            repaired = text.encode(codec).decode("utf-8")
+        except (UnicodeEncodeError, UnicodeDecodeError):
+            continue
+        if _MOJIBAKE_HINT.search(repaired):
+            continue
+        if any(unicodedata.combining(ch) for ch in repaired):
+            continue
+        try:
+            if repaired.encode("utf-8").decode(codec) == text:
+                return repaired
+        except (UnicodeEncodeError, UnicodeDecodeError):
+            continue
+    return text
+
+
+def _pack_trends_labs(path):
+    """(labs[], lab_x) from lab_positivity_aggregated.csv.
+
+    Returns a list sorted by lab_name and the SHARED x range used by every lab
+    chart: [earliest sample across ALL labs, latest analysis date across ALL
+    labs] (spec 6.5). That range is global on purpose -- it is what makes the
+    per-lab charts comparable -- so do not narrow it per lab.
+    """
+    by_lab = {}
+    with open(path, newline="", encoding="utf-8") as fh:
+        for row in csv.DictReader(fh):
+            code = (row.get("lab_name") or "").strip()
+            day = (row.get("lab_analysis_date") or "").strip()
+            if not code or not _ISO_DATE_RE.match(day):
+                continue
+            mean = _parse_optional_float(row.get("daily_positivity_mean"))
+            if mean is None:
+                continue
+            long_name = _or_none(row.get("lab_name_long"))
+            hz = _or_none(row.get("health_zone"))
+            prov = _or_none(row.get("province"))
+            earliest = (row.get("earliest_analysed_sample") or "").strip()
+            lab = by_lab.setdefault(code, {
+                "id": "lab_" + _slugify_plot_key(code),
+                "code": code,
+                # Falls back to the lab code, matching the generator: its
+                # read.csv yields a real NA, so its own nzchar() test fails and
+                # it titles the chart "LBMAM" rather than "NA".
+                "label": _fix_mojibake(long_name) if long_name else code,
+                "health_zone": _fix_mojibake(hz) if hz else None,
+                "province": _fix_mojibake(prov) if prov else None,
+                "earliest": earliest if _ISO_DATE_RE.match(earliest) else None,
+                "rows": {},
+            })
+            lab["rows"][day] = (
+                _i0(row.get("total_samples_analysed_daily")),
+                mean,
+                _parse_optional_float(row.get("daily_positivity_lower")),
+                _parse_optional_float(row.get("daily_positivity_upper")),
+            )
+
+    labs, starts, ends = [], [], []
+    for code in sorted(by_lab):
+        lab = by_lab[code]
+        days = sorted(lab["rows"])
+        if not days:
+            continue
+        counts = [lab["rows"][d][0] for d in days]
+        labs.append({
+            "id": lab["id"],
+            "code": code,
+            "label": lab["label"],
+            "health_zone": lab["health_zone"],
+            "province": lab["province"],
+            "earliest": lab["earliest"],
+            "dates": days,
+            "n": counts,
+            "mean": [lab["rows"][d][1] for d in days],
+            "lo": [lab["rows"][d][2] for d in days],
+            "hi": [lab["rows"][d][3] for d in days],
+            "max_total": max(1, max(counts)),
+        })
+        starts.append(lab["earliest"] or days[0])
+        ends.append(days[-1])
+
+    lab_x = {"start": min(starts), "end": max(ends)} if labs else None
+    return labs, lab_x
+
+
+def _trends_x_limits(cases, deaths, positivity):
+    """Per location, the min/max date across cases U deaths U positivity.
+
+    All three cards for one selection are drawn on this range (spec 6.6), so a
+    card may show empty space where its own series does not reach the ends. That
+    is intended: without it the three cards silently disagree about time.
+    """
+    def _span(entry, length_key):
+        if not entry:
+            return None
+        start = entry["start"]
+        end = (date.fromisoformat(start) + timedelta(days=len(entry[length_key]) - 1)).isoformat()
+        return start, end
+
+    limits = {}
+    for scale, _ in _TRENDS_SCALES:
+        per_scale = {}
+        names = (set(cases.get(scale, {})) | set(deaths.get(scale, {}))
+                 | set(positivity.get(scale, {})))
+        for loc in names:
+            lo, hi = [], []
+            for span in (_span(cases.get(scale, {}).get(loc), "obs"),
+                         _span(deaths.get(scale, {}).get(loc), "cum")):
+                if span:
+                    lo.append(span[0])
+                    hi.append(span[1])
+            p = positivity.get(scale, {}).get(loc)
+            if p and p["dates"]:
+                lo.append(p["dates"][0])
+                hi.append(p["dates"][-1])
+            if lo and hi:
+                per_scale[loc] = {"start": min(lo), "end": max(hi)}
+        limits[scale] = per_scale
+    return limits
+
+
+def load_trends_series(outputs_dir=None, known_noms=None):
+    """The Trends tab's data slice, or None when the snapshot is unavailable.
+
+    Uses the same directory and manifest-driven snapshot resolution as the
+    dashboard_plots SVGs, but reads the four aggregated CSVs those SVGs were
+    rendered from rather than the SVGs themselves.
+    """
+    base = Path(outputs_dir if outputs_dir is not None else DASHBOARD_PLOTS_DIR)
+    snap = _onset_manifest_dated_dir(base)
+    if snap is None:
+        print(f"  NOTE: no dated snapshot under {base}; trends charts unavailable")
+        return None
+
+    manifest = {}
+    manifest_path = base / "manifest.json"
+    if manifest_path.exists():
+        try:
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8")) or {}
+        except (json.JSONDecodeError, OSError) as exc:
+            print(f"  WARNING: invalid manifest.json: {exc}")
+
+    nom_by_norm = {_norm(n): n for n in (known_noms or ())}
+
+    def canon(name):
+        return nom_by_norm.get(_norm(name), name)
+
+    def maybe(name, fn, *args):
+        path = snap / name
+        if not path.exists():
+            print(f"  NOTE: {name} not found in {snap.name}; that card will be empty")
+            return None
+        return fn(path, *args)
+
+    cases = maybe("status_aggregated.csv", _pack_trends_cases, canon) or {}
+    deaths = maybe("cumulative_positive_deaths.csv", _pack_trends_deaths, canon) or {}
+    positivity = maybe("rolling_positivity.csv", _pack_trends_positivity, canon) or {}
+    labs_result = maybe("lab_positivity_aggregated.csv", _pack_trends_labs)
+    labs, lab_x = labs_result if labs_result else ([], None)
+
+    if not cases and not deaths and not positivity and not labs:
+        return None
+
+    days = (manifest.get("incomplete_styling") or {}).get("days")
+    try:
+        incomplete_days = int(days)
+    except (TypeError, ValueError):
+        incomplete_days = 7
+    if incomplete_days <= 0:
+        incomplete_days = 7
+
+    asof = snap.name
+    # Frozen here, at BUILD time (spec 6.7 / D7). Never recompute this in the
+    # browser: the band would drift as a page ages between builds.
+    incomplete_from = (date.fromisoformat(asof) - timedelta(days=incomplete_days)).isoformat()
+
+    def slice_of(packed, scale):
+        return packed.get(scale, {}) if packed else {}
+
+    return {
+        "asof": asof,
+        "incomplete_days": incomplete_days,
+        "incomplete_from": incomplete_from,
+        "cases": {
+            "national": slice_of(cases, "national").get("national"),
+            "provinces": slice_of(cases, "province"),
+            "health_zones": slice_of(cases, "healthzone"),
+        },
+        "deaths": {
+            "national": slice_of(deaths, "national").get("national"),
+            "provinces": slice_of(deaths, "province"),
+            "health_zones": slice_of(deaths, "healthzone"),
+        },
+        "positivity": {
+            "national": slice_of(positivity, "national").get("national"),
+            "provinces": slice_of(positivity, "province"),
+            "health_zones": slice_of(positivity, "healthzone"),
+        },
+        "labs": labs,
+        "lab_x": lab_x,
+        "x_limits": _trends_x_limits(cases, deaths, positivity),
+    }
+
+
 def _onset_manifest_dated_dir(base: Path):
     """The dated ``outputs/<date>/`` dir the onset SVGs are read from.
 
-    load_dashboard_plots() resolves the plot snapshot from manifest.json's
-    top-level ``date``; matching it here keeps this panel and the Trends SVG on
-    one snapshot. Returns None when there is no manifest, date, or matching dir.
+    The plot snapshot is resolved from manifest.json's top-level ``date``;
+    matching it here keeps this panel on the same snapshot. Returns None when
+    there is no manifest, date, or matching dir.
     """
     manifest_path = base / "manifest.json"
     if not manifest_path.exists():
@@ -4391,7 +4410,7 @@ def _latest_status_aggregated(outputs_dir):
         return preferred / _STATUS_AGG_CSV_NAME
     dated = sorted(
         (p for p in base.iterdir()
-         if p.is_dir() and _ONSET_DATE_RE.match(p.name) and (p / _STATUS_AGG_CSV_NAME).exists()),
+         if p.is_dir() and _ISO_DATE_RE.match(p.name) and (p / _STATUS_AGG_CSV_NAME).exists()),
         key=lambda p: p.name,
     )
     return (dated[-1] / _STATUS_AGG_CSV_NAME) if dated else None

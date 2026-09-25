@@ -461,6 +461,9 @@ def _render_nav(active_view: str, assets_prefix: str) -> str:
 _PAGE_SCOPED_PAYLOAD_KEYS = {
     "import_force_pairwise": {"epi-trends"},
     "genomic": {"genomic-epidemiology"},
+    # ~373 KB of series data only the Trends tab reads. Its SVG predecessor
+    # (onset_trends) was unscoped and cost every page 5.35 MB.
+    "trends": {"trends"},
 }
 
 
