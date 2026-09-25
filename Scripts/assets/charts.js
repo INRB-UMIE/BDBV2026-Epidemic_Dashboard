@@ -48,6 +48,22 @@
   function frame(svg, opts) {
     var W = opts.width, H = opts.height, pad = opts.pad;
     var t0 = dayMs(opts.xStart), t1 = dayMs(opts.xEnd);
+    // A location with one day of data gives xStart === xEnd. Left alone, that
+    // single day maps onto the ENTIRE gutter: the bar comes out as wide as the
+    // chart, centred on the left axis, so only a clipped half-block shows and
+    // every x tick carries the same date. Widen a degenerate span symmetrically
+    // so the mark renders at a normal width against a readable axis. The
+    // generator does the equivalent -- its single-day charts show one ordinary
+    // bar in an expanded window.
+    //
+    // Presentation only: this does not touch x_limits, so what counts as inside
+    // the incomplete-reporting window is unaffected.
+    var MIN_SPAN_MS = 14 * 86400000;
+    if (t1 - t0 < MIN_SPAN_MS) {
+      var mid = (t0 + t1) / 2;
+      t0 = mid - MIN_SPAN_MS / 2;
+      t1 = mid + MIN_SPAN_MS / 2;
+    }
     var span = (t1 - t0) || 86400000;
     var left = pad.left, right = W - pad.right, baseY = H - pad.bottom;
     var xToPx = function (t) { return left + ((t - t0) / span) * (right - left); };
