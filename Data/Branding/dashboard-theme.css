@@ -151,12 +151,8 @@ html, body {
 }
 
 #tracker .global-title,
-#tracker .global-cell .sub,
-#tracker .global-cell .qual {
+#tracker .global-cell .sub {
   color: var(--muted) !important;
-}
-#tracker .global-cell .qual .qnum {
-  color: var(--ink) !important;
 }
 #tracker .global-cell.cases .num {
   color: var(--terracotta) !important;

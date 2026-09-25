@@ -28,7 +28,14 @@ LANGS = ("en", "fr")
 
 # The abbreviations and the per-country row's labels. Removing them is the
 # whole point of the redesign, so none may come back.
-RETIRED_KEYS = ("outbreak_size", "conf", "susp", "conf_deaths", "susp_deaths")
+#
+# suspected_one/suspected_other joined them in 2026-09: INSP restructured the
+# sitrep headline block and stopped publishing the counts, so the header was
+# showing values 52 and 76 days stale beside figures refreshed every few days.
+# They were also never cumulative -- the tile read "CAS SUSPECTS DU JOUR" --
+# yet they rendered directly under a cumulative confirmed total.
+RETIRED_KEYS = ("outbreak_size", "conf", "susp", "conf_deaths", "susp_deaths",
+                "suspected_one", "suspected_other")
 
 REQUIRED_KEYS = (
     "eyebrow",
@@ -36,8 +43,6 @@ REQUIRED_KEYS = (
     "cases",
     "deaths",
     "recovered",
-    "suspected_one",
-    "suspected_other",
 )
 
 
@@ -85,15 +90,6 @@ def test_eyebrow_placeholders():
         )
 
 
-def test_suspected_strings_interpolate_the_count():
-    for lang in LANGS:
-        tr = _tracker_strings(lang)
-        for key in ("suspected_one", "suspected_other"):
-            assert "{n}" in tr[key], (
-                f"{lang} ui.tracker.{key} must interpolate {{n}}"
-            )
-
-
 def test_tracker_strings_are_lowercase():
     """#tracker .global-title and .global-cell .sub apply text-transform:
     uppercase, so a capitalised value renders doubly shouted -- or worse, looks
@@ -139,19 +135,20 @@ def test_build_tracker_has_no_per_country_branch():
     )
 
 
-def test_build_tracker_renders_the_qualifier():
+def test_build_tracker_renders_no_suspected_qualifier():
+    """The "N suspected" line under each confirmed figure was removed in
+    2026-09. Nothing may reintroduce it: the source it came from no longer
+    publishes the number, and the number it last published was a daily count
+    sitting under a cumulative total."""
     body = _build_tracker_source()
     for token in ("class='qual'", "class='qnum'",
                   "ui.tracker.suspected_one", "ui.tracker.suspected_other",
-                  "ui.tracker.eyebrow", "ui.tracker.eyebrow_nodate"):
-        assert token in body, f"buildTracker() should emit {token!r}"
-    # The tokens above all live inside qualifier()'s own body, so they are
-    # present whether or not it is ever called. Assert the two call sites too,
-    # and that each is wired to the suspected field matching the confirmed
-    # number it sits under.
-    for call in ('qualifier(totals.global_suspected_cases, "suspected_cases")',
-                 'qualifier(totals.global_suspected_deaths, "suspected_deaths")'):
-        assert call in body, f"buildTracker() should call {call}"
+                  "qualifier("):
+        assert token not in body, f"buildTracker() must not emit {token!r}"
+    for field in ("global_suspected_cases", "global_suspected_deaths"):
+        assert field not in body, (
+            f"buildTracker() must not read {field} -- it is stale upstream"
+        )
 
 
 def test_build_tracker_reads_confirmed_cases_not_total():
@@ -185,22 +182,14 @@ def _hex_luma(value):
     return 0.299 * r + 0.587 * g + 0.114 * b
 
 
-def test_base_stylesheet_styles_the_qualifier():
-    lines = _tracker_lines(CSS)
-    assert "#tracker .global-cell .qual {" in lines
-    assert "#tracker .global-cell .qual .qnum {" in lines
-    # Hue is reserved for what is being counted, so a suspected figure gets
-    # none -- its lower confidence is carried by tone alone. If these two
-    # collapse to one colour, nothing in the block encodes that distinction.
-    # The number is the brighter of the pair here because this is the dark
-    # base layer; the brand layer inverts both, since its background does too.
-    qual = re.search(r"#tracker \.global-cell \.qual \{[^}]*color:(#[0-9a-fA-F]{3,6})", lines)
-    qnum = re.search(r"#tracker \.global-cell \.qual \.qnum \{[^}]*color:(#[0-9a-fA-F]{3,6})", lines)
-    assert qual and qnum, "both .qual and .qual .qnum must declare a colour"
-    assert _hex_luma(qnum.group(1)) > _hex_luma(qual.group(1)), (
-        f"the suspected count ({qnum.group(1)}) must read brighter than the "
-        f"word beside it ({qual.group(1)}) on the dark base layer"
-    )
+def test_stylesheets_carry_no_qualifier_rules():
+    """The .qual/.qnum rules went with the markup; a stray rule would be dead
+    weight and would imply the line still exists."""
+    for path in (REPO / "Scripts" / "assets" / "dashboard.css",
+                 REPO / "Data" / "Branding" / "dashboard-theme.css"):
+        css = path.read_text(encoding="utf-8")
+        for sel in (".global-cell .qual", ".qual .qnum"):
+            assert sel not in css, f"{path.name} still styles {sel}"
 
 
 def test_global_row_is_top_aligned():
@@ -260,31 +249,6 @@ def test_no_rule_hides_the_eyebrow():
             )
 
 
-def test_short_viewport_shrinks_the_qualifier():
-    """A landscape phone must shrink .qual alongside .num and .sub, or the
-    header grows taller than it did before. Asserting the selector is present
-    is not enough -- an override no smaller than the base clamp's floor would
-    satisfy that while shrinking nothing."""
-    text = re.sub(r"/\*.*?\*/", "", CSS.read_text(encoding="utf-8"), flags=re.DOTALL)
-    blocks = re.findall(r"@media \(max-height: 500px\) \{(.*?)\n  \}", text, re.DOTALL)
-    assert blocks, "could not locate any @media (max-height: 500px) block"
-    overrides = [m for m in
-                 (re.search(r"#tracker \.global-cell \.qual \{([^}]*)\}", b) for b in blocks)
-                 if m]
-    assert overrides, "no short-viewport override for #tracker .global-cell .qual"
-    shrunk = re.search(r"font-size:\s*([\d.]+)px", overrides[0].group(1))
-    assert shrunk, "the short-viewport .qual rule must declare a font-size"
-    # Two-space indent picks out the unconditional rule, not the nested one.
-    base = re.search(r"^  #tracker \.global-cell \.qual \{([^}]*)\}", text, re.M)
-    assert base, "no unconditional #tracker .global-cell .qual rule found"
-    floor = re.search(r"font-size:\s*clamp\(\s*([\d.]+)px", base.group(1))
-    assert floor, "the base .qual rule must declare a clamp() font-size"
-    assert float(shrunk.group(1)) < float(floor.group(1)), (
-        f"the short-viewport override ({shrunk.group(1)}px) is not smaller than "
-        f"the base clamp's floor ({floor.group(1)}px), so it shrinks nothing"
-    )
-
-
 def _tracker_declarations(path):
     """The declaration bodies of every rule selecting under #tracker. The theme
     layer puts selectors and declarations on separate lines, so _tracker_lines()
@@ -305,12 +269,6 @@ def test_theme_layer_drops_the_hardcoded_rust():
         "the suspected-deaths colour was the one hard-coded hex in the tracker "
         "theme rules; it leaves with the row it painted"
     )
-
-
-def test_theme_layer_styles_the_qualifier():
-    lines = _tracker_lines(THEME)
-    assert "#tracker .global-cell .qual" in lines
-    assert "#tracker .global-cell .qual .qnum" in lines
 
 
 def test_tracker_hues_are_one_meaning_each():
@@ -354,24 +312,3 @@ def test_tracker_media_rules_come_after_the_base_rules():
         f"source-order tiebreak and will silently never apply"
     )
 
-
-def test_build_tracker_suppresses_a_zero_qualifier():
-    """A zero suspected count renders nothing at all -- "0 suspected" reads as
-    a finding rather than the absence of one. No other guard in this module
-    would notice if that short-circuit were dropped."""
-    body = _build_tracker_source()
-    assert 'if (!n) return "";' in body, (
-        "qualifier() must short-circuit on a falsy count before building any "
-        "markup, or a metric with no suspected cases renders an empty .qual"
-    )
-
-
-def test_recovered_cell_has_no_qualifier():
-    """Recovered is a confirmed-only outcome with no suspected counterpart, and
-    the layout leans on that: .global-row top-aligns precisely because this one
-    cell is a line shorter than the other two."""
-    body = _build_tracker_source()
-    recovered = body[body.index("global-cell recovered"):]
-    assert "qualifier(" not in recovered, (
-        "the recovered cell must not render a .qual line"
-    )

@@ -212,8 +212,6 @@ ui:
     recovered: "guéris"
     # "cas suspect(s)" and "décès suspect(s)" are both masculine, so one pair
     # of strings serves both columns.
-    suspected_one: "{n} suspect"
-    suspected_other: "{n} suspects"
   title_sub:
     latest: "Dernier"
     insp_sitrep: "sitrep INSP"

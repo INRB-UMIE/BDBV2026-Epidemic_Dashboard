@@ -1137,15 +1137,20 @@
   }
   /* Tracker stack (outbreak headline numbers, top-right of #site-header;
      rows are right-aligned to hug the header's right edge). Each metric owns
-     a column; where a suspected count exists it hangs under that metric's
-     label as .qual. See
+     a column. A suspected count used to hang under its metric as .qual; that
+     line was removed in 2026-09 (INSP stopped publishing the figure). See
      docs/superpowers/specs/2026-08-15-tracker-headline-numbers-design.md. */
   #tracker { display:flex; flex-direction:column; align-items:flex-end; margin-top:0; padding:0 4px; }
   #tracker .stats-block  { display:flex; flex-direction:column; align-items:flex-end; }
   #tracker .global-title { font-size:clamp(9px, 1.5vw, 10px); color:#bbb; text-transform:uppercase; letter-spacing:0.6px; margin-bottom:2px; text-align:right; }
-  /* flex-start, not flex-end: the recovered cell carries no .qual line, so
-     aligning bottoms would push its .num down out of line with the other two. */
-  #tracker .global-row { display:flex; align-items:flex-start; gap:clamp(14px, 6vw, 36px); line-height:1.05; }
+  /* flex-start, not flex-end. This originally mattered because only some cells
+     carried a .qual line; with those gone the cells are uniform, but top
+     alignment stays correct if a cell ever grows again. */
+  /* Tightened in 2026-09 with the suspected qualifier gone: the cells lost a
+     line (43px tall, was ~56px), so the old 36px gap -- 41% of a cell's own
+     width -- left the three numbers reading as separate blocks rather than one
+     group. */
+  #tracker .global-row { display:flex; align-items:flex-start; gap:clamp(12px, 3.5vw, 24px); line-height:1.05; }
   #tracker .global-cell { display:flex; flex-direction:column; align-items:center; }
   #tracker .global-cell .num { font-size:clamp(20px, 6vw, 30px); font-weight:700; font-variant-numeric: tabular-nums; line-height:1; }
   #tracker .global-cell .sub { font-size:clamp(9px, 1.5vw, 10px); color:#bbb; text-transform:uppercase; letter-spacing:0.6px; margin-top:2px; }
@@ -1161,8 +1166,6 @@
      nowrap is safe because #site-header sets flex-wrap:wrap -- a count long
      enough to widen the cell pushes #site-header-right onto its own row rather
      than overflowing the viewport. */
-  #tracker .global-cell .qual { font-size:clamp(9.5px, 1.5vw, 10.5px); color:#bbb; margin-top:3px; font-variant-numeric: tabular-nums; white-space:nowrap; }
-  #tracker .global-cell .qual .qnum { color:#ddd; font-weight:600; }
   #tracker .global-cell.cases  .num { color:#ffd166; }
   #tracker .global-cell.deaths .num { color:#ff4d4d; }
   #tracker .global-cell.recovered .num { color:#8CD790; }
@@ -1195,7 +1198,6 @@
     #tracker .global-row { gap:clamp(8px, 3vh, 16px); }
     #tracker .global-cell .num { font-size:clamp(16px, 4.5vh, 22px); }
     #tracker .global-cell .sub { font-size:9px; margin-top:0; }
-    #tracker .global-cell .qual { font-size:9px; margin-top:1px; }
   }
   #imperial-model-estimates {
     margin-top:6px;
