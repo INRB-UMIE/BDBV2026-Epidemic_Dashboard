@@ -212,8 +212,6 @@ ui:
     cases: "cases"
     deaths: "deaths"
     recovered: "recovered"
-    suspected_one: "{n} suspected"
-    suspected_other: "{n} suspected"
   title_sub:
     latest: "Latest"
     insp_sitrep: "INSP Sit Rep"
