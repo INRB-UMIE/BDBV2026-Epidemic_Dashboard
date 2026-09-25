@@ -408,16 +408,16 @@ function buildTracker() {
       ? base + "<span class='caveat-mark' aria-hidden='true'>" + esc(mark) + "</span>"
       : base;
   }
-  // Suspected counts hang under the confirmed figure they qualify, so they can
-  // only be read against the right number. A zero renders nothing at all --
-  // "0 suspected" reads as a finding rather than the absence of one.
-  function qualifier(v, metric) {
-    const n = v || 0;
-    if (!n) return "";
-    const key = n === 1 ? "ui.tracker.suspected_one" : "ui.tracker.suspected_other";
-    const num = "<span class='qnum'>" + countWithMark(n, metric) + "</span>";
-    return "<div class='qual'>" + tf(key, { n: num }) + "</div>";
-  }
+  // The header used to hang a "N suspected" line under each confirmed figure.
+  // Removed 2026-09-25: INSP restructured the sitrep headline block and no
+  // longer publishes those counts, so the dashboard was showing the last value
+  // transcribed -- 52 days stale for cases, 76 for deaths -- beside figures
+  // refreshed every few days, with nothing to signal the difference.
+  //
+  // The numbers were also never cumulative. The tile they came from read
+  // "CAS SUSPECTS DU JOUR" (suspected cases THAT DAY), yet they were stored as
+  // national_cumulative_suspected_* and rendered directly under a genuinely
+  // cumulative confirmed total.
   const tr = t("ui.tracker");
   const footnotesHTML = caveats.length
     ? "<div class='tracker-footnotes'>" +
@@ -441,12 +441,10 @@ function buildTracker() {
         "<div class='global-cell cases'>" +
           "<div class='num'>" + countWithMark(totals.global_confirmed_cases, "confirmed_cases") + "</div>" +
           "<div class='sub'>" + tr.cases + "</div>" +
-          qualifier(totals.global_suspected_cases, "suspected_cases") +
         "</div>" +
         "<div class='global-cell deaths'>" +
           "<div class='num'>" + countWithMark(totals.global_confirmed_deaths, "confirmed_deaths") + "</div>" +
           "<div class='sub'>" + tr.deaths + "</div>" +
-          qualifier(totals.global_suspected_deaths, "suspected_deaths") +
         "</div>" +
         "<div class='global-cell recovered'>" +
           "<div class='num'>" + fmtLocale(totals.global_recovered_cases) + "</div>" +
