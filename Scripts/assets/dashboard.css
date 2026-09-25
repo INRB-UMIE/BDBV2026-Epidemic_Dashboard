@@ -1146,7 +1146,11 @@
   /* flex-start, not flex-end. This originally mattered because only some cells
      carried a .qual line; with those gone the cells are uniform, but top
      alignment stays correct if a cell ever grows again. */
-  #tracker .global-row { display:flex; align-items:flex-start; gap:clamp(14px, 6vw, 36px); line-height:1.05; }
+  /* Tightened in 2026-09 with the suspected qualifier gone: the cells lost a
+     line (43px tall, was ~56px), so the old 36px gap -- 41% of a cell's own
+     width -- left the three numbers reading as separate blocks rather than one
+     group. */
+  #tracker .global-row { display:flex; align-items:flex-start; gap:clamp(12px, 3.5vw, 24px); line-height:1.05; }
   #tracker .global-cell { display:flex; flex-direction:column; align-items:center; }
   #tracker .global-cell .num { font-size:clamp(20px, 6vw, 30px); font-weight:700; font-variant-numeric: tabular-nums; line-height:1; }
   #tracker .global-cell .sub { font-size:clamp(9px, 1.5vw, 10px); color:#bbb; text-transform:uppercase; letter-spacing:0.6px; margin-top:2px; }
