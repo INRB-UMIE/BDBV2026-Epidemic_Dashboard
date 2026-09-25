@@ -4496,7 +4496,7 @@ def load_rolling_positivity_case_series(
         for row in csv.DictReader(fh):
             scale = (row.get("spatial_scale") or "").strip().lower()
             d = (row.get("date_of_symptom_onset_imputed") or "").strip()
-            if not _ONSET_DATE_RE.match(d):
+            if not _ISO_DATE_RE.match(d):
                 continue
             try:
                 n = int(float(row.get("confirmed_case") or 0))
