@@ -190,6 +190,7 @@ __all__ = [
     'write_effective_confirmed_cases',
     'build_active_case_markers',
     'build_genome_sequence_markers',
+    'apply_tree_genome_counts',
     '_EMAIL_RE',
     '_BULLET_PREFIXES',
     '_strip_bullet',
@@ -2961,15 +2962,47 @@ def build_active_case_markers(zone_data: dict[str, dict],
     return out
 
 
+def apply_tree_genome_counts(zone_data: dict[str, dict], tips: list) -> dict[str, int]:
+    """Replace GeoJSON sequence counts with tip counts from the loaded phylogeny.
+
+    Map circles read ``genomic_sequence_count``. The build GeoJSON snapshot
+    lags the tree, so once tips are loaded (and zone spellings canonicalised)
+    each health zone's count is the number of tips in that zone. Zones that
+    have left the tree lose their old count, so the circle disappears.
+    """
+    counts: dict[str, int] = {}
+    for tip in tips or []:
+        zone = (tip.get("health_zone") or "").strip()
+        if zone and zone != "null":
+            counts[zone] = counts.get(zone, 0) + 1
+    for rec in zone_data.values():
+        rec.pop("genomic_sequence_count", None)
+    applied: dict[str, int] = {}
+    for nom, n in counts.items():
+        rec = zone_data.get(nom)
+        if rec is None or n <= 0:
+            continue
+        rec["genomic_sequence_count"] = n
+        applied[nom] = n
+    unmatched = sorted(set(counts) - set(applied))
+    if unmatched:
+        print("  genomic sequence counts: no zone geometry for "
+              + ", ".join(unmatched))
+    print(f"  genomic sequence counts: {sum(applied.values())} tips "
+          f"across {len(applied)} zones (from phylogeny)")
+    return applied
+
+
 def build_genome_sequence_markers(
     zone_data: dict[str, dict],
     centroids: dict[str, tuple[float, float]],
 ) -> list[dict]:
     """One marker per zone with at least one genome sequence.
 
-    Reads ``genomic_sequence_count`` from ``zone_data``, which load_metadata()
-    already populates from the build GeoJSON's embedded genomic_surveillance
-    properties (no separate CSV read needed)."""
+    Reads ``genomic_sequence_count`` from ``zone_data``. After a phylogeny has
+    loaded, ``apply_tree_genome_counts`` has replaced the GeoJSON snapshot
+    with tip counts from that tree; otherwise the GeoJSON value set by
+    ``load_metadata`` is the fallback."""
     out: list[dict] = []
     for nom, rec in zone_data.items():
         if nom not in centroids:
