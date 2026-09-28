@@ -31,6 +31,8 @@ def test_rolling_positivity_aggregates_confirmed_case(tmp_path):
     # Two healthzone rows for Bunia on 2026-05-01 (2 + 1), case-folded to Bunia
     assert res["by_zone"]["Bunia"]["2026-05-01"] == {"observed": 3, "imputed": 0}
     assert res["by_zone"]["Mongbwalu"]["2026-05-02"] == {"observed": 0, "imputed": 0}
+    # Scatterplot totals: health-zone confirmed_case sums only (province row ignored).
+    assert res["zone_case_totals"] == {"Bunia": 3, "Mongbwalu": 0}
     # National rows preferred over summing zones / provinces
     assert res["national"]["2026-05-01"] == {"observed": 4, "imputed": 0}
     assert res["national"]["2026-05-02"] == {"observed": 1, "imputed": 0}

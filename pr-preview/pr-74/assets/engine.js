@@ -675,14 +675,14 @@ const map = L.map("map", {zoomControl: false}).setView([INITIAL_VIEW.lat, INITIA
 //
 // The placeholder deliberately contains braces so it fails the character test
 // below: an unsubstituted build therefore sends no `key` parameter at all
-// instead of a literal "{{CARTO_BASEMAP_KEY}}". The same test rejects a
+// instead of a literal "cb1_2gkn_1_caa9a973d1b5b58f2f681a45". The same test rejects a
 // malformed injected value, which is what keeps a stray quote in the
 // environment from breaking out of this string literal.
 //
 // NOTE: CARTO is retiring these raster tiles in favour of vector basemaps
 // (light_all -> positron-gl-style). That migration means Leaflet -> MapLibre
 // and is tracked separately; the key applies either way.
-const CARTO_KEY = "{{CARTO_BASEMAP_KEY}}";
+const CARTO_KEY = "cb1_2gkn_1_caa9a973d1b5b58f2f681a45";
 const CARTO_TILES = "https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png"
   + (/^[A-Za-z0-9_-]+$/.test(CARTO_KEY) ? "?key=" + encodeURIComponent(CARTO_KEY) : "");
 L.tileLayer(CARTO_TILES, {
@@ -3674,43 +3674,7 @@ function activateTrendsScope(scope) {
 
 // --- active-case markers ---
 const ACTIVE_CASES = PAYLOAD.active_case_markers || [];
-// Circle size and hover text both come from these markers. Prefer tip counts
-// from the phylogeny embedded in this page so a newer tree replaces the
-// GeoJSON sequence snapshot (which is what genome_sequence_markers used to be).
-function genomeMarkersFromPhylo(payload) {
-  const tips = (payload.genomic && payload.genomic.tips) || [];
-  const counts = Object.create(null);
-  tips.forEach(function (t) {
-    var z = t && t.health_zone;
-    if (!z || z === "null") return;
-    z = String(z).trim();
-    if (!z) return;
-    counts[z] = (counts[z] || 0) + 1;
-  });
-  const noms = Object.keys(counts);
-  if (!noms.length) return payload.genome_sequence_markers || [];
-  const zd = payload.zone_data || {};
-  Object.keys(zd).forEach(function (nom) {
-    if (zd[nom] && !counts[nom]) delete zd[nom].genomic_sequence_count;
-  });
-  const out = [];
-  noms.forEach(function (nom) {
-    const rec = zd[nom];
-    const lat = rec && rec.centroid_lat;
-    const lon = rec && rec.centroid_lon;
-    if (!rec || !isFinite(lat) || !isFinite(lon) || counts[nom] <= 0) return;
-    rec.genomic_sequence_count = counts[nom];
-    out.push({
-      nom: nom,
-      name: rec.name || nom,
-      lat: lat,
-      lon: lon,
-      count: counts[nom],
-    });
-  });
-  return out;
-}
-const GENOME_SEQUENCES = genomeMarkersFromPhylo(PAYLOAD);
+const GENOME_SEQUENCES = PAYLOAD.genome_sequence_markers || [];
 const GENOME_MAX_COUNT = GENOME_SEQUENCES.reduce(function(max, g) {
   return Math.max(max, g.count || 0);
 }, 1);

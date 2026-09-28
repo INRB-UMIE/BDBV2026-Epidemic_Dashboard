@@ -2965,10 +2965,13 @@ def build_active_case_markers(zone_data: dict[str, dict],
 def apply_tree_genome_counts(zone_data: dict[str, dict], tips: list) -> dict[str, int]:
     """Replace GeoJSON sequence counts with tip counts from the loaded phylogeny.
 
-    Map circles read ``genomic_sequence_count``. The build GeoJSON snapshot
-    lags the tree, so once tips are loaded (and zone spellings canonicalised)
-    each health zone's count is the number of tips in that zone. Zones that
-    have left the tree lose their old count, so the circle disappears.
+    The build GeoJSON's ``genomic_surveillance.sequence_count`` lags the tree.
+    Map circles, hover tooltips, and the zone info panel all read
+    ``genomic_sequence_count``, so it has to be the number of tips per
+    canonical health zone in the tree that was just loaded. Zones absent from
+    that tree lose their old count (no stale circle). Tips whose zone has no
+    geometry are counted but not written; callers should already have run
+    ``canonicalize_genomic_zones``.
     """
     counts: dict[str, int] = {}
     for tip in tips or []:
@@ -3000,9 +3003,9 @@ def build_genome_sequence_markers(
     """One marker per zone with at least one genome sequence.
 
     Reads ``genomic_sequence_count`` from ``zone_data``. After a phylogeny has
-    loaded, ``apply_tree_genome_counts`` has replaced the GeoJSON snapshot
-    with tip counts from that tree; otherwise the GeoJSON value set by
-    ``load_metadata`` is the fallback."""
+    loaded, ``apply_tree_genome_counts`` has already replaced the GeoJSON
+    snapshot with tip counts from that tree; otherwise the GeoJSON value set
+    by ``load_metadata`` is the fallback."""
     out: list[dict] = []
     for nom, rec in zone_data.items():
         if nom not in centroids:
@@ -4535,6 +4538,9 @@ def load_rolling_positivity_case_series(
 
     by_zone: dict = {}
     national: dict = {}
+    # Per-zone sum of healthzone ``confirmed_case`` rows. The cases-vs-genomes
+    # scatter reads this and nothing else (not sitrep, harmonised, or linelist).
+    zone_case_totals: dict[str, int] = {}
     with open(path, newline="", encoding="utf-8") as fh:
         for row in csv.DictReader(fh):
             scale = (row.get("spatial_scale") or "").strip().lower()
@@ -4555,6 +4561,7 @@ def load_rolling_positivity_case_series(
                     d, {"observed": 0, "imputed": 0},
                 )
                 bucket["observed"] += n
+                zone_case_totals[z] = zone_case_totals.get(z, 0) + n
             elif scale == "national":
                 bucket = national.setdefault(d, {"observed": 0, "imputed": 0})
                 bucket["observed"] += n
@@ -4577,6 +4584,7 @@ def load_rolling_positivity_case_series(
         "beyond_tree_from": tree_most_recent,
         "source": "rolling_positivity",
         "case_source": "rolling_positivity.confirmed_case",
+        "zone_case_totals": zone_case_totals,
     }
 
 

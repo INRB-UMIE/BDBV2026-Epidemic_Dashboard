@@ -102,8 +102,8 @@ def build_shared_payload() -> dict:
     active_case_markers = build_active_case_markers(zone_data, centroids_by_nom)
     print(f"  active-case markers: {len(active_case_markers)} zones "
           f"(confirmed ≥ 1 from GeoJSON)")
-    # Genome circles are built after the phylogeny loads, so their counts
-    # follow the latest tree. See apply_tree_genome_counts below.
+    # Genome circles are built after the phylogeny loads so their counts follow
+    # the latest tree. See apply_tree_genome_counts below.
 
     province_boundaries = build_province_boundaries()
     print(f"  province boundaries: {len(province_boundaries['features'])} provinces")
@@ -135,9 +135,8 @@ def build_shared_payload() -> dict:
         # Reconcile tip health_zone spellings to the canonical noms (producer typos
         # like 'Nyakunde'->'Nyankunde' otherwise break map<->tree selection + case scope).
         canonicalize_genomic_zones(genomic, set(zone_data))
-        # Blue circles and hover sequence counts read genomic_sequence_count.
-        # Drive it from this tree's tips so a newer phylogeny replaces the
-        # GeoJSON snapshot.
+        # Map circles + hover read genomic_sequence_count. Drive it from this
+        # tree's tips so a newer phylogeny replaces the GeoJSON snapshot.
         apply_tree_genome_counts(zone_data, genomic.get("tips") or [])
         # Cases for the genomic time-series + cases-vs-genomes scatter come from
         # Phylogenetic_Analyses rolling_positivity.csv (confirmed_case), not the

@@ -3674,42 +3674,32 @@ function activateTrendsScope(scope) {
 
 // --- active-case markers ---
 const ACTIVE_CASES = PAYLOAD.active_case_markers || [];
-// Blue circles follow the phylogeny embedded in this page. Tip health_zone
-// spellings are matched to map noms (diacritics and hyphens folded) so a
-// newer tree replaces the GeoJSON sequence snapshot.
-function genomeNomKey(s) {
-  return String(s || "").normalize("NFKD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/[^a-z0-9]+/g, "");
-}
+// Circle size and hover text both come from these markers. Prefer tip counts
+// from the phylogeny embedded in this page so a newer tree replaces the
+// GeoJSON sequence snapshot (which is what genome_sequence_markers used to be).
 function genomeMarkersFromPhylo(payload) {
   const tips = (payload.genomic && payload.genomic.tips) || [];
-  const zd = payload.zone_data || {};
-  const byKey = {};
-  Object.keys(zd).forEach(function (nom) {
-    const k = genomeNomKey(nom);
-    if (k && !byKey[k]) byKey[k] = nom;
-  });
-  const counts = {};
-  let matched = 0;
+  const counts = Object.create(null);
   tips.forEach(function (t) {
-    const z = t && t.health_zone;
+    var z = t && t.health_zone;
     if (!z || z === "null") return;
-    const nom = byKey[genomeNomKey(z)] || (zd[z] ? z : null);
-    if (!nom) return;
-    counts[nom] = (counts[nom] || 0) + 1;
-    matched++;
+    z = String(z).trim();
+    if (!z) return;
+    counts[z] = (counts[z] || 0) + 1;
   });
-  if (!matched) return payload.genome_sequence_markers || [];
+  const noms = Object.keys(counts);
+  if (!noms.length) return payload.genome_sequence_markers || [];
+  const zd = payload.zone_data || {};
   Object.keys(zd).forEach(function (nom) {
-    if (!zd[nom]) return;
-    if (counts[nom]) zd[nom].genomic_sequence_count = counts[nom];
-    else delete zd[nom].genomic_sequence_count;
+    if (zd[nom] && !counts[nom]) delete zd[nom].genomic_sequence_count;
   });
   const out = [];
-  Object.keys(counts).forEach(function (nom) {
+  noms.forEach(function (nom) {
     const rec = zd[nom];
     const lat = rec && rec.centroid_lat;
     const lon = rec && rec.centroid_lon;
     if (!rec || !isFinite(lat) || !isFinite(lon) || counts[nom] <= 0) return;
+    rec.genomic_sequence_count = counts[nom];
     out.push({
       nom: nom,
       name: rec.name || nom,
@@ -3718,7 +3708,7 @@ function genomeMarkersFromPhylo(payload) {
       count: counts[nom],
     });
   });
-  return out.length ? out : (payload.genome_sequence_markers || []);
+  return out;
 }
 const GENOME_SEQUENCES = genomeMarkersFromPhylo(PAYLOAD);
 const GENOME_MAX_COUNT = GENOME_SEQUENCES.reduce(function(max, g) {

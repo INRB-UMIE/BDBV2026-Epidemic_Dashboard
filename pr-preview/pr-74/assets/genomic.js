@@ -825,17 +825,14 @@
   }
 
   // Scatter: confirmed cases vs genomes per health zone (raw or log–log).
-  // Case counts are only zone_case_totals: the sum of health-zone confirmed_case
-  // rows in rolling_positivity.csv. Sitrep, harmonised, and linelist counts are
-  // not used. A zone missing from that file is plotted at 0 cases.
   // Clicking a point selects that health zone on the map + phylogeny (via coordinator).
   function renderCorrPanel(genomic) {
     var host = document.getElementById("gen-corr-body");
     if (!host) return;
     var od = genomic.onset_distribution || {};
-    var caseTotals = od.zone_case_totals || {};
+    var byZone = od.by_zone || {};
     var tips = genomic.tips || [];
-    if (!Object.keys(caseTotals).length && !tips.length) {
+    if (!Object.keys(byZone).length && !tips.length) {
       host.textContent = (typeof t === "function" ? t("ui.genomic.no_corr_data") : null) || "No zone-level case/genome data";
       return;
     }
@@ -849,10 +846,14 @@
 
     var rows = [];
     var allZones = {};
-    Object.keys(caseTotals).forEach(function (z) { allZones[z] = 1; });
+    Object.keys(byZone).forEach(function (z) { allZones[z] = 1; });
     Object.keys(genomes).forEach(function (z) { allZones[z] = 1; });
     Object.keys(allZones).forEach(function (z) {
-      var cases = caseTotals[z] || 0;
+      var series = byZone[z] || {};
+      var cases = 0;
+      Object.keys(series).forEach(function (d) {
+        cases += (series[d].observed || 0) + (series[d].imputed || 0);
+      });
       var g = genomes[z] || 0;
       if (cases <= 0 && g <= 0) return;
       rows.push({ zone: z, cases: cases, genomes: g, coverage: cases > 0 ? g / cases : null });

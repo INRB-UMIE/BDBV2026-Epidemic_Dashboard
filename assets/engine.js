@@ -2130,15 +2130,14 @@ const geoLayer = L.geoJSON(PAYLOAD.geometry, {
         if (activeView === "genomic-epidemiology") {
           // Zones are clickable here -- the click routes to the genomic
           // coordinator -- so they get the same hover lift as everywhere else.
-          // What they must NOT get is the snapshot's layer-value tooltip (the
-          // default fall-through below): those are bound per-hover, and the
-          // "tooltipopen" sweep only covers marker/arc layers, so a dropped
-          // mouseout on fast motion strands one open. Lift the border, bind
-          // nothing.
+          // The sequence/case readout lives on the polygon (not the blue genome
+          // circle). It is a per-hover tooltip, unbound on mouseout and on pan,
+          // and is not the snapshot's layer-value tooltip.
           if (!isSelected) {
             e.target.setStyle(zoneStroke("hover"));
             e.target.bringToFront();
           }
+          openGenomicZoneTooltip(e.target, feature, e.latlng);
           return;
         }
         if (activeView === "trends") {
@@ -2181,9 +2180,7 @@ const geoLayer = L.geoJSON(PAYLOAD.geometry, {
       },
       mouseout: function(e) {
         if (activeView === "genomic-epidemiology") {
-          // Mirror of the mouseover lift. No tooltip was bound, so nothing to
-          // unbind; resetStyle cannot disturb a selected zone's ring, which
-          // lives in the zone-selection pane.
+          if (e.target.getTooltip()) e.target.unbindTooltip();
           geoLayer.resetStyle(e.target);
           return;
         }
@@ -3677,7 +3674,43 @@ function activateTrendsScope(scope) {
 
 // --- active-case markers ---
 const ACTIVE_CASES = PAYLOAD.active_case_markers || [];
-const GENOME_SEQUENCES = PAYLOAD.genome_sequence_markers || [];
+// Circle size and hover text both come from these markers. Prefer tip counts
+// from the phylogeny embedded in this page so a newer tree replaces the
+// GeoJSON sequence snapshot (which is what genome_sequence_markers used to be).
+function genomeMarkersFromPhylo(payload) {
+  const tips = (payload.genomic && payload.genomic.tips) || [];
+  const counts = Object.create(null);
+  tips.forEach(function (t) {
+    var z = t && t.health_zone;
+    if (!z || z === "null") return;
+    z = String(z).trim();
+    if (!z) return;
+    counts[z] = (counts[z] || 0) + 1;
+  });
+  const noms = Object.keys(counts);
+  if (!noms.length) return payload.genome_sequence_markers || [];
+  const zd = payload.zone_data || {};
+  Object.keys(zd).forEach(function (nom) {
+    if (zd[nom] && !counts[nom]) delete zd[nom].genomic_sequence_count;
+  });
+  const out = [];
+  noms.forEach(function (nom) {
+    const rec = zd[nom];
+    const lat = rec && rec.centroid_lat;
+    const lon = rec && rec.centroid_lon;
+    if (!rec || !isFinite(lat) || !isFinite(lon) || counts[nom] <= 0) return;
+    rec.genomic_sequence_count = counts[nom];
+    out.push({
+      nom: nom,
+      name: rec.name || nom,
+      lat: lat,
+      lon: lon,
+      count: counts[nom],
+    });
+  });
+  return out;
+}
+const GENOME_SEQUENCES = genomeMarkersFromPhylo(PAYLOAD);
 const GENOME_MAX_COUNT = GENOME_SEQUENCES.reduce(function(max, g) {
   return Math.max(max, g.count || 0);
 }, 1);
@@ -3755,12 +3788,74 @@ function genomeMarkerTooltip(g) {
   );
 }
 
+// Confirmed-case totals for the genomic map hover, from the same rolling-
+// positivity series the cases-vs-genomes scatter uses (health-zone
+// confirmed_case, summed over dates). Not sitrep or harmonised counts.
+let genomicCaseTotalsByNom = null;
+function genomicCaseTotals() {
+  if (genomicCaseTotalsByNom) return genomicCaseTotalsByNom;
+  const totals = {};
+  const byZone = (((PAYLOAD.genomic || {}).onset_distribution || {}).by_zone) || {};
+  Object.keys(byZone).forEach(function (z) {
+    let n = 0;
+    const series = byZone[z] || {};
+    Object.keys(series).forEach(function (d) {
+      const day = series[d] || {};
+      n += (day.observed || 0) + (day.imputed || 0);
+    });
+    totals[z] = n;
+  });
+  genomicCaseTotalsByNom = totals;
+  return totals;
+}
+
+let genomicSeqByNom = null;
+function genomicSequenceCounts() {
+  if (genomicSeqByNom) return genomicSeqByNom;
+  const counts = {};
+  GENOME_SEQUENCES.forEach(function (g) {
+    if (g && g.nom) counts[g.nom] = g.count || 0;
+  });
+  genomicSeqByNom = counts;
+  return counts;
+}
+
+// Polygon hover on the genomic tab: zone name, sequence count (same wording as
+// the old circle popup), and confirmed cases. Shown for every zone with
+// reported cases, including those with no sequences, and for sequence-only
+// zones so that information is not lost. Returns null when both are zero.
+function genomicZoneHoverHTML(feature) {
+  const nom = feature.properties && feature.properties.nom;
+  if (!nom) return null;
+  const name = feature.properties.name || nom;
+  const seq = genomicSequenceCounts()[nom] || 0;
+  const cases = genomicCaseTotals()[nom] || 0;
+  if (seq <= 0 && cases <= 0) return null;
+  return (
+    "<strong>" + name + "</strong><br/>" +
+    t("ui.genome_tooltip").replace("{n}", seq) + "<br/>" +
+    t("ui.case_tooltip.confirmed_cases") + ": " + fmt(cases)
+  );
+}
+
+function openGenomicZoneTooltip(layer, feature, latlng) {
+  geoLayer.eachLayer(function (l) {
+    if (l !== layer && l.getTooltip && l.getTooltip()) l.unbindTooltip();
+  });
+  const html = genomicZoneHoverHTML(feature);
+  if (!html) {
+    if (layer.getTooltip()) layer.unbindTooltip();
+    return;
+  }
+  layer.bindTooltip(html, {sticky: true, direction: "top"}).openTooltip(latlng);
+}
+
 function refreshMarkerTooltips() {
   caseLayer.eachLayer(function(m) {
     if (m._bdbvCase) m.setTooltipContent(caseMarkerTooltip(m._bdbvCase));
   });
   genomeLayer.eachLayer(function(m) {
-    if (m._bdbvGenome) m.setTooltipContent(genomeMarkerTooltip(m._bdbvGenome));
+    if (m._bdbvGenome && m.getTooltip()) m.setTooltipContent(genomeMarkerTooltip(m._bdbvGenome));
   });
 }
 
@@ -3803,9 +3898,10 @@ for (const c of ACTIVE_CASES) {
 
 for (const g of GENOME_SEQUENCES) {
   if (!isFinite(g.lat) || !isFinite(g.lon)) continue;
-  const m = L.marker([g.lat, g.lon], {icon: genomeIcon(g.count)});
+  const m = L.marker([g.lat, g.lon], {icon: genomeIcon(g.count), interactive: false});
   m._bdbvGenome = g;
-  m.bindTooltip(genomeMarkerTooltip(g), {direction:"top", offset:[0,-8]});
+  // Hover readout is on the zone polygon, not the circle. The marker stays
+  // non-interactive so the polygon underneath receives the hover.
   // On the genomic view a marker click selects that zone's tip-set (routed to the
   // genomic coordinator via the generic hook; genomic.js owns the tip logic).
   m.on("click", function(e) {
