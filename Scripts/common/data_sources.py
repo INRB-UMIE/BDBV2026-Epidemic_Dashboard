@@ -688,7 +688,16 @@ _NORM_RE = re.compile(r"[^a-z0-9]+")
 
 
 def _norm(s) -> str:
-    return _NORM_RE.sub("", str(s).lower()) if s else ""
+    """Case- and punctuation-insensitive key for health-zone name matching.
+
+    Diacritics are folded first (NFKD), so a tree spelling such as ``Nia-Nią``
+    matches the map nom ``Nia Nia``. Punctuation and spaces are then dropped.
+    """
+    if not s:
+        return ""
+    folded = unicodedata.normalize("NFKD", str(s))
+    folded = "".join(ch for ch in folded if not unicodedata.combining(ch))
+    return _NORM_RE.sub("", folded.lower())
 
 
 def _html_escape(s: str) -> str:
@@ -3915,7 +3924,8 @@ def canonicalize_genomic_zones(genomic: dict, known_noms) -> dict:
 
     The genomic tree producer occasionally spells a zone differently from the
     dashboard's build-GeoJSON noms (observed: 'Nyakunde' -> 'Nyankunde', 'Gethy'
-    -> 'Gety'). Left unfixed, selecting such a zone on the map highlights no tips
+    -> 'Gety', 'Nia-Nią' -> 'Nia Nia'). Left unfixed, selecting such a zone on the
+    map highlights no tips
     (``zoneToTips`` is keyed by the tip spelling) and the by-zone case scope misses
     it. Correct BOTH the tips list and the inline NEXUS ``health_zone`` annotations
     so tree colouring, selection, and case scoping all agree. Matching is exact

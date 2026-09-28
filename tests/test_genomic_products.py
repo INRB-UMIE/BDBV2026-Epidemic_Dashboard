@@ -58,3 +58,14 @@ def test_apply_tree_genome_counts_replaces_geojson_snapshot():
 def test_load_genomic_products_absent_returns_empty(tmp_path, monkeypatch):
     _isolate_from_siblings(monkeypatch, tmp_path, tmp_path / "missing")
     assert ds.load_genomic_products() == {}          # build stays green if the sibling is absent
+
+
+def test_canonicalize_nia_nia_ogonek_matches_map_nom():
+    genomic = {
+        "tips": [{"id": "PP_007LUHR.1", "health_zone": "Nia-Nią"}],
+        "tree": 'BIA[&date="2026-08-25",health_zone="Nia-Nią"]',
+    }
+    ds.canonicalize_genomic_zones(genomic, {"Nia Nia", "Bunia"})
+    assert genomic["tips"][0]["health_zone"] == "Nia Nia"
+    assert 'health_zone="Nia Nia"' in genomic["tree"]
+    assert "Nia-Nią" not in genomic["tree"]

@@ -1303,7 +1303,10 @@
   .case-icon { width:14px; height:14px; border-radius:50%; background:rgba(91,134,179,0.85); border:1.5px solid #fff; box-shadow:0 0 6px rgba(91,134,179,0.45); }
   .case-tt-row { display:flex; justify-content:space-between; gap:12px; }
   .case-tt-row span:last-child { font-variant-numeric: tabular-nums; }
-  .genome-icon { border-radius:50%; background:rgba(91,134,179,0.75); border:1.5px solid rgba(255,255,255,0.85); box-shadow:0 0 4px rgba(91,134,179,0.35); box-sizing:border-box; }
+  .genome-icon { border-radius:50%; background:rgba(91,134,179,0.75); border:1.5px solid rgba(255,255,255,0.85); box-shadow:0 0 4px rgba(91,134,179,0.35); box-sizing:border-box; pointer-events:none; }
+  /* The circle is a marker only. Hover and click belong to the zone polygon
+     underneath, which carries the sequence/case popup. */
+  .leaflet-marker-icon:has(.genome-icon) { pointer-events: none !important; }
   /* Genomic tab: a genome marker whose zone is the current coordinator selection
      (class toggled on the marker's icon element by engine.js highlightZones). */
   .leaflet-marker-icon.genome-marker-sel .genome-icon {
