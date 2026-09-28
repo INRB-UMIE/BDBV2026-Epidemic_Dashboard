@@ -3752,22 +3752,21 @@ function genomeMarkerTooltip(g) {
   );
 }
 
-// Confirmed-case totals for the genomic map hover, from the same rolling-
-// positivity series the cases-vs-genomes scatter uses (health-zone
-// confirmed_case, summed over dates). Not sitrep or harmonised counts.
+// Confirmed-case totals for the genomic map hover. These are the map's
+// per-zone confirmed counts (harmonised line list ∪ sitrep), which cover
+// every province. Rolling-positivity health-zone rows do not: zones such as
+// Dungu and Miti Murhesa have confirmed cases there but no row in that file,
+// so a hover based only on it never opened outside Ituri and Nord-Kivu.
 let genomicCaseTotalsByNom = null;
 function genomicCaseTotals() {
   if (genomicCaseTotalsByNom) return genomicCaseTotalsByNom;
   const totals = {};
-  const byZone = (((PAYLOAD.genomic || {}).onset_distribution || {}).by_zone) || {};
-  Object.keys(byZone).forEach(function (z) {
-    let n = 0;
-    const series = byZone[z] || {};
-    Object.keys(series).forEach(function (d) {
-      const day = series[d] || {};
-      n += (day.observed || 0) + (day.imputed || 0);
-    });
-    totals[z] = n;
+  Object.keys(ZONE_DATA || {}).forEach(function (nom) {
+    const rec = ZONE_DATA[nom] || {};
+    const effective = Number(rec.effective_confirmed_cases);
+    const sitrep = Number(rec.confirmed_cases);
+    const n = Number.isFinite(effective) ? effective : (Number.isFinite(sitrep) ? sitrep : 0);
+    if (n > 0) totals[nom] = n;
   });
   genomicCaseTotalsByNom = totals;
   return totals;
