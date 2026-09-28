@@ -69,3 +69,25 @@ def test_canonicalize_nia_nia_ogonek_matches_map_nom():
     assert genomic["tips"][0]["health_zone"] == "Nia Nia"
     assert 'health_zone="Nia Nia"' in genomic["tree"]
     assert "Nia-Nią" not in genomic["tree"]
+
+
+def test_apply_tree_genome_counts_replaces_geojson_snapshot():
+    zone_data = {
+        "Bunia": {"name": "Bunia", "genomic_sequence_count": 3},
+        "Aru": {"name": "Aru", "genomic_sequence_count": 9},
+        "Nia Nia": {"name": "Nia Nia"},
+    }
+    tips = [
+        {"health_zone": "Bunia"},
+        {"health_zone": "Bunia"},
+        {"health_zone": "Nia Nia"},
+        {"health_zone": "Nowhere"},
+    ]
+    applied = ds.apply_tree_genome_counts(zone_data, tips)
+    assert applied == {"Bunia": 2, "Nia Nia": 1}
+    assert zone_data["Bunia"]["genomic_sequence_count"] == 2
+    assert "genomic_sequence_count" not in zone_data["Aru"]
+    markers = ds.build_genome_sequence_markers(
+        zone_data, {"Bunia": (30.0, 1.5), "Nia Nia": (29.0, 1.2)}
+    )
+    assert {m["nom"]: m["count"] for m in markers} == {"Bunia": 2, "Nia Nia": 1}
