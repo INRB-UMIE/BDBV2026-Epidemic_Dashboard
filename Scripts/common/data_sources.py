@@ -190,6 +190,7 @@ __all__ = [
     'write_effective_confirmed_cases',
     'build_active_case_markers',
     'build_genome_sequence_markers',
+    'apply_tree_genome_counts',
     '_EMAIL_RE',
     '_BULLET_PREFIXES',
     '_strip_bullet',
@@ -2952,15 +2953,50 @@ def build_active_case_markers(zone_data: dict[str, dict],
     return out
 
 
+def apply_tree_genome_counts(zone_data: dict[str, dict], tips: list) -> dict[str, int]:
+    """Replace GeoJSON sequence counts with tip counts from the loaded phylogeny.
+
+    The build GeoJSON's ``genomic_surveillance.sequence_count`` lags the tree.
+    Map circles, hover tooltips, and the zone info panel all read
+    ``genomic_sequence_count``, so it has to be the number of tips per
+    canonical health zone in the tree that was just loaded. Zones absent from
+    that tree lose their old count (no stale circle). Tips whose zone has no
+    geometry are counted but not written; callers should already have run
+    ``canonicalize_genomic_zones``.
+    """
+    counts: dict[str, int] = {}
+    for tip in tips or []:
+        zone = (tip.get("health_zone") or "").strip()
+        if zone and zone != "null":
+            counts[zone] = counts.get(zone, 0) + 1
+    for rec in zone_data.values():
+        rec.pop("genomic_sequence_count", None)
+    applied: dict[str, int] = {}
+    for nom, n in counts.items():
+        rec = zone_data.get(nom)
+        if rec is None or n <= 0:
+            continue
+        rec["genomic_sequence_count"] = n
+        applied[nom] = n
+    unmatched = sorted(set(counts) - set(applied))
+    if unmatched:
+        print("  genomic sequence counts: no zone geometry for "
+              + ", ".join(unmatched))
+    print(f"  genomic sequence counts: {sum(applied.values())} tips "
+          f"across {len(applied)} zones (from phylogeny)")
+    return applied
+
+
 def build_genome_sequence_markers(
     zone_data: dict[str, dict],
     centroids: dict[str, tuple[float, float]],
 ) -> list[dict]:
     """One marker per zone with at least one genome sequence.
 
-    Reads ``genomic_sequence_count`` from ``zone_data``, which load_metadata()
-    already populates from the build GeoJSON's embedded genomic_surveillance
-    properties (no separate CSV read needed)."""
+    Reads ``genomic_sequence_count`` from ``zone_data``. After a phylogeny has
+    loaded, ``apply_tree_genome_counts`` has already replaced the GeoJSON
+    snapshot with tip counts from that tree; otherwise the GeoJSON value set
+    by ``load_metadata`` is the fallback."""
     out: list[dict] = []
     for nom, rec in zone_data.items():
         if nom not in centroids:
@@ -4492,6 +4528,9 @@ def load_rolling_positivity_case_series(
 
     by_zone: dict = {}
     national: dict = {}
+    # Per-zone sum of healthzone ``confirmed_case`` rows. The cases-vs-genomes
+    # scatter reads this and nothing else (not sitrep, harmonised, or linelist).
+    zone_case_totals: dict[str, int] = {}
     with open(path, newline="", encoding="utf-8") as fh:
         for row in csv.DictReader(fh):
             scale = (row.get("spatial_scale") or "").strip().lower()
@@ -4512,6 +4551,7 @@ def load_rolling_positivity_case_series(
                     d, {"observed": 0, "imputed": 0},
                 )
                 bucket["observed"] += n
+                zone_case_totals[z] = zone_case_totals.get(z, 0) + n
             elif scale == "national":
                 bucket = national.setdefault(d, {"observed": 0, "imputed": 0})
                 bucket["observed"] += n
@@ -4534,6 +4574,7 @@ def load_rolling_positivity_case_series(
         "beyond_tree_from": tree_most_recent,
         "source": "rolling_positivity",
         "case_source": "rolling_positivity.confirmed_case",
+        "zone_case_totals": zone_case_totals,
     }
 
 

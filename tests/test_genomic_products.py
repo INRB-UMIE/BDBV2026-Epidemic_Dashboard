@@ -32,6 +32,29 @@ def test_load_genomic_products_reads_all(tmp_path, monkeypatch):
     assert out["exponential"]["growth"] == 0.07
 
 
+def test_apply_tree_genome_counts_replaces_geojson_snapshot():
+    zone_data = {
+        "Bunia": {"name": "Bunia", "genomic_sequence_count": 3},
+        "Aru": {"name": "Aru", "genomic_sequence_count": 9},
+        "Katwa": {"name": "Katwa"},
+    }
+    tips = [
+        {"health_zone": "Bunia"},
+        {"health_zone": "Bunia"},
+        {"health_zone": "Katwa"},
+        {"health_zone": "Nowhere"},
+    ]
+    applied = ds.apply_tree_genome_counts(zone_data, tips)
+    assert applied == {"Bunia": 2, "Katwa": 1}
+    assert zone_data["Bunia"]["genomic_sequence_count"] == 2
+    assert "genomic_sequence_count" not in zone_data["Aru"]
+    markers = ds.build_genome_sequence_markers(
+        zone_data, {"Bunia": (30.0, 1.5), "Katwa": (29.0, 1.2)}
+    )
+    by_nom = {m["nom"]: m["count"] for m in markers}
+    assert by_nom == {"Bunia": 2, "Katwa": 1}
+
+
 def test_load_genomic_products_absent_returns_empty(tmp_path, monkeypatch):
     _isolate_from_siblings(monkeypatch, tmp_path, tmp_path / "missing")
     assert ds.load_genomic_products() == {}          # build stays green if the sibling is absent
