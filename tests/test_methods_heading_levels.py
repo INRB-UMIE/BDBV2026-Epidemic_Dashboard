@@ -49,7 +49,7 @@ def test_preserves_inline_markup_in_the_demoted_heading():
     assert fix(html) == "<h3>Contributors <em>and friends</em></h3>\n<h3>Data</h3>"
 
 
-def test_real_english_document_renders_three_peer_sections():
+def test_real_english_document_renders_peer_sections():
     if not ds.METHODS_DOCX.exists():
         pytest.skip(f"{ds.METHODS_DOCX.name} not in this checkout")
     pytest.importorskip("docx", reason="python-docx not installed")
@@ -57,11 +57,11 @@ def test_real_english_document_renders_three_peer_sections():
 
     html = ds.load_methods_html()
     levels = {
-        re.sub(r"<[^>]+>", "", text): tag.lower()
+        re.sub(r"<[^>]+>", "", text).strip(): tag.lower()
         for tag, text in re.findall(r"<(h[234])>(.*?)</\1>", html, re.S)
     }
-    for section in ("Contributors", "Data", "Methods"):
+    for section in ("Contributors", "Data sources", "Methods", "Funding"):
         assert section in levels, f"{section} section heading missing"
-    assert len({levels["Contributors"], levels["Data"], levels["Methods"]}) == 1, (
+    assert len({levels[s] for s in ("Contributors", "Data sources", "Methods", "Funding")}) == 1, (
         f"top-level sections render at mixed levels: {levels}"
     )
