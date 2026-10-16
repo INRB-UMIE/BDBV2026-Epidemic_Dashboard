@@ -37,6 +37,10 @@ def test_genomic_module_contributes_rail_and_script():
     page = importlib.import_module("pages.genomic_epidemiology")
     html = page.build_page(MINIMAL)
     assert 'id="genomic-panel"' in html
+    assert 'class="gen-intro"' in html
+    assert 'data-i18n-html="ui.genomic.latest_report"' in html
+    assert 'data-i18n-html="ui.genomic.intro"' in html
+    assert html.index('ui.genomic.latest_report') < html.index('ui.genomic.intro')
     assert 'id="gen-tree-body"' in html and 'id="gen-dist-body"' in html
     assert 'id="gen-corr-body"' in html
     assert 'id="genomic-resize"' in html                      # drag handle present

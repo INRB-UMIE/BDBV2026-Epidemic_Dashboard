@@ -1408,7 +1408,9 @@
     margin: 0; font-size: 11.5px; line-height: 1.5; color: #5c574f;
     background: #fff; border: 1px solid #e7e3db; border-radius: 4px; padding: 8px 10px;
     overflow-wrap: anywhere;
+    display: flex; flex-direction: column; gap: 8px;
   }
+  #genomic-panel .gen-intro p { margin: 0; }
   #genomic-panel .gen-intro a { color: #9b7d4e; text-decoration: underline; }
   #genomic-panel .gen-intro a:hover { color: #7c6231; }
   #genomic-panel .gen-card {
