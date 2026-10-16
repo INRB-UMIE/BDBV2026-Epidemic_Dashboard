@@ -228,6 +228,11 @@ __all__ = [
     '_load_locale_yaml',
     'load_locales',
     'localize_layers',
+    'parse_genomic_report_filename',
+    'genomic_report_pdf_url',
+    'pick_latest_genomic_report_files',
+    'resolve_latest_genomic_report_urls',
+    'inject_genomic_report_links',
     'build_i18n_payload',
     'load_data_build_info',
     'load_genomic_products',
@@ -273,6 +278,23 @@ INSP_FETCH_USER_AGENT = "BDBV2026-Dashboard-Build/1.0"
 INSP_SITREP_FETCH = os.environ.get("INSP_SITREP_FETCH", "1").strip().lower() not in (
     "0", "false", "no", "off",
 )
+
+# Latest genomic characterisation PDFs in INRB-UMIE/BDBV2026-Reports/Genomic.
+# Filenames are ``YYYY-MM-DD_<title>_<EN|FR>.pdf``; the build picks the newest
+# date per language. Links use jsDelivr so the browser opens the PDF itself
+# (application/pdf) rather than GitHub's HTML blob preview.
+GENOMIC_REPORTS_REPO = os.environ.get(
+    "GENOMIC_REPORTS_REPO", "INRB-UMIE/BDBV2026-Reports",
+).strip() or "INRB-UMIE/BDBV2026-Reports"
+GENOMIC_REPORTS_PATH = os.environ.get("GENOMIC_REPORTS_PATH", "Genomic").strip() or "Genomic"
+GENOMIC_REPORTS_REF = os.environ.get("GENOMIC_REPORTS_REF", "main").strip() or "main"
+GENOMIC_REPORT_PDF_RE = re.compile(
+    r"^(?P<date>\d{4}-\d{2}-\d{2})_.+_(?P<lang>EN|FR)\.pdf$", re.IGNORECASE,
+)
+GENOMIC_REPORT_FALLBACK_FILES = {
+    "en": "2026-09-23_Report-Genomics_EN.pdf",
+    "fr": "2026-09-23_Rapport-Genomique_FR.pdf",
+}
 
 # Slugs for the Bundibugyo Ebola sitrep series on insp.cd (not generic MVE carousel pages).
 # INSP has renamed the sitrep slug twice: ``sitrep-n072-mvb_25-07-2026`` up to
@@ -3746,6 +3768,113 @@ def load_locales() -> dict[str, dict]:
     return locales
 
 
+def parse_genomic_report_filename(name: str) -> tuple[datetime.date, str] | None:
+    """Parse ``YYYY-MM-DD_*_(EN|FR).pdf`` → (date, dashboard lang ``en``/``fr``)."""
+    m = GENOMIC_REPORT_PDF_RE.match((name or "").strip())
+    if not m:
+        return None
+    try:
+        report_date = datetime.strptime(m.group("date"), "%Y-%m-%d").date()
+    except ValueError:
+        return None
+    lang = m.group("lang").upper()
+    if lang == "EN":
+        return report_date, "en"
+    if lang == "FR":
+        return report_date, "fr"
+    return None
+
+
+def genomic_report_pdf_url(filename: str) -> str:
+    """CDN URL that serves the PDF with ``Content-Type: application/pdf``."""
+    name = (filename or "").lstrip("/")
+    return (
+        f"https://cdn.jsdelivr.net/gh/{GENOMIC_REPORTS_REPO}"
+        f"@{GENOMIC_REPORTS_REF}/{GENOMIC_REPORTS_PATH}/{name}"
+    )
+
+
+def pick_latest_genomic_report_files(names: list[str]) -> dict[str, str]:
+    """Pick the newest dated ``_EN`` / ``_FR`` PDF filename per language."""
+    best: dict[str, tuple[datetime.date, str]] = {}
+    for name in names:
+        parsed = parse_genomic_report_filename(name)
+        if not parsed:
+            continue
+        report_date, lang = parsed
+        prev = best.get(lang)
+        if prev is None or report_date > prev[0] or (
+            report_date == prev[0] and name > prev[1]
+        ):
+            best[lang] = (report_date, name)
+    return {lang: filename for lang, (_date, filename) in best.items()}
+
+
+def _list_genomic_report_filenames_from_github() -> list[str] | None:
+    """List PDF names under Reports/Genomic via the GitHub Contents API."""
+    api = (
+        f"https://api.github.com/repos/{GENOMIC_REPORTS_REPO}"
+        f"/contents/{GENOMIC_REPORTS_PATH}?ref={GENOMIC_REPORTS_REF}"
+    )
+    req = urllib.request.Request(
+        api,
+        headers={
+            "User-Agent": INSP_FETCH_USER_AGENT,
+            "Accept": "application/vnd.github+json",
+        },
+    )
+    try:
+        with urllib.request.urlopen(
+            req, timeout=INSP_FETCH_TIMEOUT_S, context=ssl.create_default_context(),
+        ) as resp:
+            payload = json.loads(resp.read().decode("utf-8"))
+    except (urllib.error.URLError, TimeoutError, OSError, json.JSONDecodeError) as exc:
+        print(f"  NOTE: genomic reports listing failed ({api}): {exc}")
+        return None
+    if not isinstance(payload, list):
+        print(f"  NOTE: genomic reports listing returned non-list payload from {api}")
+        return None
+    names: list[str] = []
+    for item in payload:
+        if not isinstance(item, dict) or item.get("type") != "file":
+            continue
+        name = item.get("name")
+        if isinstance(name, str) and name.lower().endswith(".pdf"):
+            names.append(name)
+    return names
+
+
+def resolve_latest_genomic_report_urls() -> dict[str, str]:
+    """Return ``{en, fr}`` → jsDelivr PDF URLs for the newest dated reports."""
+    names = _list_genomic_report_filenames_from_github()
+    picked = pick_latest_genomic_report_files(names or [])
+    urls: dict[str, str] = {}
+    for lang in SUPPORTED_LANGS:
+        filename = picked.get(lang) or GENOMIC_REPORT_FALLBACK_FILES.get(lang)
+        if not filename:
+            continue
+        urls[lang] = genomic_report_pdf_url(filename)
+        source = "github" if lang in picked else "fallback"
+        print(f"  genomic report ({lang}, {source}): {filename}")
+    return urls
+
+
+def inject_genomic_report_links(locales: dict[str, dict]) -> dict[str, str]:
+    """Fill ``{report_url}`` in ``ui.genomic.latest_report`` for each locale."""
+    urls = resolve_latest_genomic_report_urls()
+    for lang in SUPPORTED_LANGS:
+        genomic = ((locales.get(lang) or {}).get("ui") or {}).get("genomic")
+        if not isinstance(genomic, dict):
+            continue
+        template = genomic.get("latest_report")
+        if not isinstance(template, str) or "{report_url}" not in template:
+            continue
+        url = urls.get(lang) or urls.get("en") or ""
+        genomic["latest_report"] = template.replace("{report_url}", url)
+        genomic["latest_report_url"] = url
+    return urls
+
+
 def localize_layers(layers: list[dict], locale: dict) -> list[dict]:
     """Return a copy of ``layers`` with group/label text from a locale bundle."""
     group_map = locale.get("layer_groups") or {}
@@ -3774,6 +3903,7 @@ def localize_layers(layers: list[dict], locale: dict) -> list[dict]:
 
 def build_i18n_payload(layers_en: list[dict], phr_context: dict[str, dict]) -> dict:
     locales = load_locales()
+    inject_genomic_report_links(locales)
     layers_by_lang = {
         lang: localize_layers(layers_en, locales.get(lang, {}))
         for lang in SUPPORTED_LANGS

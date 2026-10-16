@@ -304,6 +304,7 @@ ui:
     genomic_resize: "Drag to resize"
 
   genomic:
+    latest_report: 'The latest report detailing the genomic characterisation and epidemiology of the BDBV outbreak in the DRC can be found <a href="{report_url}" target="_blank" rel="noopener">here</a>.'
     intro: 'A more detailed report of the data, methodology, and result interpretation can be found at <a href="https://virological.org/t/genomic-epidemiology-of-the-ongoing-2026-bundibugyo-virus-disease-outbreak-in-the-democratic-republic-of-the-congo/1045" target="_blank" rel="noopener">virological.org/t/genomic-epidemiology-of-the-ongoing-2026-bundibugyo-virus-disease-outbreak-in-the-democratic-republic-of-the-congo/1045</a>.'
     phylogeny_title: "Phylogeny"
     phylogeny_tip: "Time-scale phylogeny of sequenced Bundibugyo viral genomes, with tips coloured by health zone where sample collection took place. Node bars indicate the 95% HPD of the inferred dates."

@@ -304,6 +304,7 @@ ui:
     genomic_resize: "Glisser pour redimensionner"
 
   genomic:
+    latest_report: 'Le dernier rapport détaillant la caractérisation génomique et l''épidémiologie de l''épidémie de BDBV en RDC est disponible <a href="{report_url}" target="_blank" rel="noopener">ici</a>.'
     intro: 'Un rapport plus détaillé sur les données, la méthodologie et l''interprétation des résultats est disponible sur <a href="https://virological.org/t/genomic-epidemiology-of-the-ongoing-2026-bundibugyo-virus-disease-outbreak-in-the-democratic-republic-of-the-congo/1045" target="_blank" rel="noopener">virological.org/t/genomic-epidemiology-of-the-ongoing-2026-bundibugyo-virus-disease-outbreak-in-the-democratic-republic-of-the-congo/1045</a>.'
     phylogeny_title: "Phylogénie"
     phylogeny_tip: "Phylogénie à échelle temporelle des génomes viraux Bundibugyo séquencés, avec les feuilles colorées selon la zone de santé de prélèvement. Les barres nodales indiquent l'intervalle de crédibilité à 95 % (HPD) des dates inférées."
