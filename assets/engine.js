@@ -2149,6 +2149,8 @@ const geoLayer = L.geoJSON(PAYLOAD.geometry, {
             setTrendsProvinceHover(feature.properties.province);
             return;
           }
+          // Health-area scope: the area layer above owns hover and click.
+          if (trendsScope === "health_area") return;
           if (!isSelected) {
             e.target.setStyle(zoneStroke("hover"));
             e.target.bringToFront();
@@ -2382,10 +2384,39 @@ const LOCATION_INDEX = (function() {
   const zones = ZONE_SEARCH_INDEX.map(function(z) {
     return {id: z.nom, label: z.name, kind: "health_zone", haystack: z.haystack};
   });
-  return provinces.concat(zones).sort(function(a, b) {
+  // Health areas exist only where PAYLOAD.trends does (trends.html). Labelled
+  // "Area (Zone)" because area names repeat across zones; the zone is in the
+  // haystack too, so typing a zone name lists its areas.
+  const zoneNameByNom = {};
+  ZONE_SEARCH_INDEX.forEach(function(z) { zoneNameByNom[z.nom] = z.name; });
+  const areas = healthAreaKeysForIndex().map(function(key) {
+    const i = key.indexOf("|");
+    const zone = i < 0 ? "" : key.slice(0, i);
+    const area = i < 0 ? key : key.slice(i + 1);
+    const zoneName = zoneNameByNom[zone] || zone;
+    return {
+      id: key,
+      label: zone ? area + " (" + zoneName + ")" : area,
+      kind: "health_area",
+      haystack: (area + " " + zoneName).toLowerCase(),
+    };
+  });
+  return provinces.concat(zones, areas).sort(function(a, b) {
     return String(a.label).localeCompare(String(b.label), undefined, {sensitivity: "base"});
   });
 })();
+
+// Every health area with any Trends series, whether or not it has a polygon.
+// A hoisted function declaration: LOCATION_INDEX above calls it at load time.
+function healthAreaKeysForIndex() {
+  const t = PAYLOAD.trends;
+  if (!t) return [];
+  const seen = {};
+  ["cases", "deaths", "positivity"].forEach(function (family) {
+    Object.keys((t[family] && t[family].health_areas) || {}).forEach(function (k) { seen[k] = true; });
+  });
+  return Object.keys(seen);
+}
 
 // The view comes from <body data-initial-view>, NOT from activeView:
 // bootstrapInitialView() runs at the very bottom of this file, so activeView
@@ -2412,7 +2443,7 @@ const ZONE_SEARCH_VIEWS = {
     select: function(entry) { selectContextZone(entry.id); },
   },
   "trends": {
-    kinds: ["province", "health_zone"],
+    kinds: ["province", "health_zone", "health_area"],
     // The only tab that lists provinces, so the only one whose placeholder
     // and accessible name say "location" rather than "health zone".
     placeholder: "ui.trends_search_placeholder",
@@ -2508,6 +2539,10 @@ function zoneSearchZoomTo(entry) {
       const props = layer.feature && layer.feature.properties;
       if (!bounds && props && props.province === entry.id) bounds = layer.getBounds();
     });
+  } else if (entry.kind === "health_area") {
+    const layer = findHealthAreaLayer(entry.id) ||
+      findGeoLayerByNom(healthAreaParts(entry.id).zone);
+    if (layer) bounds = layer.getBounds();
   } else {
     const layer = findGeoLayerByNom(entry.id);
     if (layer) bounds = layer.getBounds();
@@ -2846,6 +2881,108 @@ function escHtml(s) {
     .replace(/"/g, "&quot;");
 }
 
+// --- health-area layer (Trends "Health Area" scope) ---
+// Keys are "<zone nom>|<area>" (data_sources.TRENDS_HEALTH_AREA_SEP): area
+// names repeat across zones, so the zone is part of the identity. Polygons come
+// from PAYLOAD.trends.health_area_boundaries and only exist for areas whose
+// name matched the shapefile; unmatched areas still chart and are searchable.
+const HEALTH_AREA_SEP = "|";
+
+function healthAreaParts(key) {
+  const s = String(key || "");
+  const i = s.indexOf(HEALTH_AREA_SEP);
+  return i < 0 ? {zone: "", area: s} : {zone: s.slice(0, i), area: s.slice(i + 1)};
+}
+
+function healthAreaLabel(key) {
+  const p = healthAreaParts(key);
+  if (!p.zone) return p.area;
+  return p.area + " (" + (zoneDisplayName(p.zone) || p.zone) + ")";
+}
+window.healthAreaLabel = healthAreaLabel;
+window.healthAreaParts = healthAreaParts;
+
+function healthAreaBoundaries() {
+  const t = PAYLOAD.trends;
+  return (t && t.health_area_boundaries) || {type: "FeatureCollection", features: []};
+}
+
+// 420: above the zone polygons (overlayPane, 400) so area borders draw over
+// the zone fills and receive the clicks, below the zone selection ring (445).
+map.createPane("health-area");
+map.getPane("health-area").style.zIndex = "420";
+
+function healthAreaStyle(state) {
+  const base = zoneWeight(map.getZoom()) * zoneNum("--health-area-weight-mult", "0.55");
+  if (state === "hover") {
+    return Object.assign({}, zoneStroke("hover"), {fillOpacity: 0});
+  }
+  return {
+    color: themeVar("--zone-stroke", "#fdfaf4"),
+    opacity: zoneNum("--health-area-stroke-opacity", "0.75"),
+    weight: base,
+    // fill stays ON (transparent) so a click anywhere inside the area lands
+    // on it, not only on its border.
+    fill: true,
+    fillOpacity: 0,
+  };
+}
+
+const healthAreaLayer = L.geoJSON(healthAreaBoundaries(), {
+  pane: "health-area",
+  style: function () { return healthAreaStyle("rest"); },
+  onEachFeature: function (feature, layer) {
+    layer.on({
+      mouseover: function (e) {
+        if (mapMoving) return;
+        if (feature.properties.key === trendsSelectedKey) return;
+        e.target.setStyle(healthAreaStyle("hover"));
+        e.target.bringToFront();
+      },
+      mouseout: function (e) {
+        healthAreaLayer.resetStyle(e.target);
+      },
+      click: function (e) {
+        L.DomEvent.stop(e);
+        const key = feature.properties.key;
+        setTrendsSelection(key === trendsSelectedKey ? null : key);
+      },
+    });
+    layer.bindTooltip(function () { return escHtml(healthAreaLabel(feature.properties.key)); },
+      {sticky: true, direction: "top"});
+  },
+});
+
+const healthAreaRings = SelectionRing("health-area-selection", 447, function () {
+  const base = zoneWeight(map.getZoom());
+  return {
+    inner: base * zoneNum("--zone-selected-weight-mult", "2.2"),
+    casing: base * zoneNum("--zone-selected-casing-mult", "3.6")
+  };
+});
+
+function findHealthAreaLayer(key) {
+  let found = null;
+  healthAreaLayer.eachLayer(function (layer) {
+    if (!found && layer.feature && layer.feature.properties.key === key) found = layer;
+  });
+  return found;
+}
+
+// Shows/hides the layer for the current view+scope and repaints the ring.
+// Called from every place that changes scope, selection or view.
+function syncHealthAreaLayer() {
+  const on = activeView === "trends" && trendsScope === "health_area";
+  if (on && !map.hasLayer(healthAreaLayer)) healthAreaLayer.addTo(map);
+  if (!on && map.hasLayer(healthAreaLayer)) map.removeLayer(healthAreaLayer);
+  if (on) healthAreaLayer.setStyle(function () { return healthAreaStyle("rest"); });
+  const sel = on && trendsSelectedKey ? findHealthAreaLayer(trendsSelectedKey) : null;
+  healthAreaRings.set(sel ? [sel.feature] : []);
+}
+map.on("zoomend", function () {
+  if (map.hasLayer(healthAreaLayer)) syncHealthAreaLayer();
+});
+
 function renderTrendsPanel(_unused) {
   renderTrendsPlots();
 }
@@ -2877,6 +3014,13 @@ function trendsEntityList() {
       return String(a).localeCompare(String(b), undefined, {sensitivity: "base"});
     }).map(function(id) { return {id: id, label: zoneDisplayName(id) || id, kind: "health_zone"}; });
   }
+  if (trendsScope === "health_area") {
+    return Object.keys((data.cases && data.cases.health_areas) || {}).map(function(id) {
+      return {id: id, label: healthAreaLabel(id), kind: "health_area"};
+    }).sort(function(a, b) {
+      return String(a.label).localeCompare(String(b.label), undefined, {sensitivity: "base"});
+    });
+  }
   return [{id: "national", label: t("ui.trends_scope_national"), kind: "national"}];
 }
 
@@ -2897,6 +3041,11 @@ window.trendsEmptyMessage = function() {
     return escHtml(trendsSelectedKey
       ? tf("ui.trends_no_plot", {name: trendsSelectedKey})
       : t("ui.trends_select_province"));
+  }
+  if (trendsScope === "health_area") {
+    return escHtml(trendsSelectedKey
+      ? tf("ui.trends_no_plot", {name: healthAreaLabel(trendsSelectedKey)})
+      : t("ui.trends_select_health_area"));
   }
   return escHtml(trendsSelectedKey
     ? tf("ui.trends_no_plot", {name: zoneDisplayName(trendsSelectedKey) || trendsSelectedKey})
@@ -2931,6 +3080,7 @@ function setTrendsSelection(key) {
   renderTrendsPlots();
   if (activeView === "trends") geoLayer.setStyle(styleFn);
   refreshZoneSelection();
+  syncHealthAreaLayer();
 }
 
 function setTrendsScope(scope) {
@@ -2943,6 +3093,7 @@ function setTrendsScope(scope) {
     showProvinceOutlines();
   }
   refreshZoneSelection();
+  syncHealthAreaLayer();
 }
 
 function syncTrendsPlayButton() {
@@ -3438,6 +3589,8 @@ function leaveTrendsView() {
   hideProvinceOutlines();
   trendsSelectedKey = null;
   renderTrendsPlots();
+  if (map.hasLayer(healthAreaLayer)) map.removeLayer(healthAreaLayer);
+  healthAreaRings.clear();
   if (savedMapLayerId) {
     layerSelect.value = savedMapLayerId;
     recompute();

@@ -55,7 +55,22 @@
     if (!key) return null;
     if (scope === "province") return (d[family].provinces || {})[key] || null;
     if (scope === "health_zone") return (d[family].health_zones || {})[key] || null;
+    if (scope === "health_area") return (d[family].health_areas || {})[key] || null;
     return null;
+  }
+
+  // Scope id (UI) -> spatial_scale id (x_limits keys, from the CSVs). Explicit
+  // so a new scope cannot silently borrow another scope's date ranges.
+  var SCALE_OF_SCOPE = {
+    national: "national", province: "province",
+    health_zone: "healthzone", health_area: "healtharea"
+  };
+
+  // "<zone nom>|<area>" -> {zone, area}; see engine.js healthAreaParts().
+  function areaParts(key) {
+    if (global.healthAreaParts) return global.healthAreaParts(key);
+    var s = String(key || ""), i = s.indexOf("|");
+    return i < 0 ? { zone: "", area: s } : { zone: s.slice(0, i), area: s.slice(i + 1) };
   }
 
   // The SHARED date range for this selection (spec 6.6). All three spatial
@@ -63,7 +78,8 @@
   function xLimits(scope, key) {
     var d = trends();
     if (!d || !d.x_limits) return null;
-    var scale = scope === "national" ? "national" : (scope === "province" ? "province" : "healthzone");
+    var scale = SCALE_OF_SCOPE[scope];
+    if (!scale) return null;
     var name = scope === "national" ? "national" : key;
     return name ? (d.x_limits[scale] || {})[name] || null : null;
   }
@@ -211,8 +227,10 @@
     var labs = (d && d.labs) || [];
     if (scope === "national") return labs;
     if (!key) return [];
-    var field = scope === "health_zone" ? "health_zone" : "province";
-    var want = normLoc(key);
+    // Labs are located by zone, not by area: an area shows its zone's labs
+    // (the card title names the zone, see render()).
+    var field = scope === "province" ? "province" : "health_zone";
+    var want = normLoc(scope === "health_area" ? areaParts(key).zone : key);
     return labs.filter(function (l) { return l[field] && normLoc(l[field]) === want; });
   }
 
@@ -359,7 +377,15 @@
     var scope = state.scope, key = state.key;
     var place = scope === "national"
       ? tr("ui.trends_scope_national", "National")
-      : (scope === "health_zone" && global.zoneDisplayName ? (global.zoneDisplayName(key) || key) : key);
+      : scope === "health_area"
+        ? (global.healthAreaLabel ? global.healthAreaLabel(key) : key)
+        : (scope === "health_zone" && global.zoneDisplayName ? (global.zoneDisplayName(key) || key) : key);
+    // Lab card: located by zone, so at area scope it names the parent zone.
+    var labPlace = place;
+    if (scope === "health_area" && key) {
+      var zone = areaParts(key).zone;
+      labPlace = (global.zoneDisplayName && global.zoneDisplayName(zone)) || zone || place;
+    }
     var lim = xLimits(scope, key);
 
     card("trends-title", "trends-body", "ui.trends_panel", "Daily Cases by Symptom Onset",
@@ -385,7 +411,7 @@
     // placeholder literally.
     if (labTitle) {
       labTitle.textContent = global.tf
-        ? global.tf("ui.trends_labs_panel", { location: place })
+        ? global.tf("ui.trends_labs_panel", { location: labPlace })
         : tr("ui.trends_labs_panel", "Laboratory testing");
     }
     var labs = labsForSelection(scope, key);
