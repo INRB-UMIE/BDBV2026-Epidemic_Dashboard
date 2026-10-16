@@ -277,14 +277,14 @@ POS_CSV = (
 )
 
 
-def test_positivity_is_sparse_overwrites_and_keeps_full_precision(tmp_path):
+def test_positivity_is_sparse_overwrites_and_rounds_to_4dp(tmp_path):
     (tmp_path / "rolling_positivity.csv").write_text(POS_CSV, encoding="utf-8")
 
     out = ds._pack_trends_positivity(tmp_path / "rolling_positivity.csv", canon=lambda s: s)
 
     nat = out["national"]["national"]
     assert nat["dates"] == ["2026-05-01", "2026-05-03"]     # 05-02 NOT invented
-    assert nat["mean"] == [0.206549314377238, 0.6]          # full precision; duplicate overwrote
+    assert nat["mean"] == [0.2065, 0.6]                     # rounded to 4 dp; duplicate overwrote
     assert nat["lo"] == [0.1, 0.3]
     assert nat["hi"] == [0.9, 0.8]
     assert out["healthzone"]["Nyankunde"]["mean"] == [1.0]  # proportion, NOT scaled to 100 here
@@ -311,9 +311,10 @@ def test_positivity_gap_stays_absent_not_densified(tmp_path):
     assert nat["mean"] == [0.1, 0.2]
 
 
-def test_positivity_mean_survives_at_full_precision(tmp_path):
-    # A value that would visibly change under any rounding (e.g. round(x, 4)
-    # or round(x, 6)) must come back byte-identical to the source string.
+def test_positivity_is_rounded_to_4dp_without_visible_change(tmp_path):
+    # Rounded to 4 dp (0.01 percentage points) to keep the payload small. The
+    # charts show one decimal of a percentage, so the rounding must never move
+    # a displayed value: 0.123456789 -> 12.3% either way.
     csv_text = (
         "date_of_symptom_onset_imputed,confirmed_case,spatial_scale,province,health_zone,"
         "daily_positivity_mean,daily_positivity_lower,daily_positivity_upper\n"
@@ -323,7 +324,10 @@ def test_positivity_mean_survives_at_full_precision(tmp_path):
 
     out = ds._pack_trends_positivity(tmp_path / "rolling_positivity.csv")
 
-    assert out["national"]["national"]["mean"] == [0.123456789012345]
+    nat = out["national"]["national"]
+    assert nat["mean"] == [0.1235]
+    assert nat["lo"] == [0.01] and nat["hi"] == [0.99]
+    assert f"{nat['mean'][0] * 100:.1f}" == f"{0.123456789012345 * 100:.1f}"
 
 
 def test_positivity_unparseable_mean_is_skipped_entirely(tmp_path):
@@ -873,8 +877,8 @@ def test_load_trends_series_tolerates_missing_csvs(tmp_path):
 
     assert res is not None
     assert res["cases"]["national"] is not None
-    assert res["deaths"] == {"national": None, "provinces": {}, "health_zones": {}}
-    assert res["positivity"] == {"national": None, "provinces": {}, "health_zones": {}}
+    assert res["deaths"] == {"national": None, "provinces": {}, "health_zones": {}, "health_areas": {}}
+    assert res["positivity"] == {"national": None, "provinces": {}, "health_zones": {}, "health_areas": {}}
     assert res["labs"] == []
     assert res["lab_x"] is None
 
@@ -924,12 +928,12 @@ def test_load_trends_series_is_not_none_when_csvs_are_present_but_header_only(tm
     res = ds.load_trends_series(outputs_dir=out)
 
     assert res is not None
-    assert res["cases"] == {"national": None, "provinces": {}, "health_zones": {}}
-    assert res["deaths"] == {"national": None, "provinces": {}, "health_zones": {}}
-    assert res["positivity"] == {"national": None, "provinces": {}, "health_zones": {}}
+    assert res["cases"] == {"national": None, "provinces": {}, "health_zones": {}, "health_areas": {}}
+    assert res["deaths"] == {"national": None, "provinces": {}, "health_zones": {}, "health_areas": {}}
+    assert res["positivity"] == {"national": None, "provinces": {}, "health_zones": {}, "health_areas": {}}
     assert res["labs"] == []
     assert res["lab_x"] is None
-    assert res["x_limits"] == {"national": {}, "province": {}, "healthzone": {}}
+    assert res["x_limits"] == {"national": {}, "province": {}, "healthzone": {}, "healtharea": {}}
 
 
 # --- mojibake repair -------------------------------------------------------
@@ -1044,3 +1048,88 @@ def test_or_none_treats_NA_and_blank_as_absent():
         assert ds._or_none(absent) is None
     for present in ("Mambasa", "Ituri", "Nia Nia", "0"):
         assert ds._or_none(present) == present.strip()
+
+
+# --- health-area scale ---------------------------------------------------------
+
+HA_CASES_CSV = (
+    "date_of_symptom_onset_imputed,onset_date_was_imputed,confirmed_case,"
+    "spatial_scale,province,health_zone,health_area\n"
+    "2026-05-02,FALSE,2,healtharea,NA,BUNIA,Aero\n"
+    # same area name in a DIFFERENT zone must stay a separate location
+    "2026-05-02,FALSE,1,healtharea,NA,Mambasa,Aero\n"
+    # an area row without its zone is ambiguous and must be dropped
+    "2026-05-02,FALSE,9,healtharea,NA,NA,Orphan\n"
+    # health-zone rows carry health_area = NA and must not leak into areas
+    "2026-05-02,FALSE,3,healthzone,NA,Bunia,NA\n"
+)
+
+
+def test_health_area_rows_are_keyed_by_canonical_zone_and_area(tmp_path):
+    (tmp_path / "status_aggregated.csv").write_text(HA_CASES_CSV, encoding="utf-8")
+
+    out = ds._pack_trends_cases(tmp_path / "status_aggregated.csv",
+                                canon=lambda s: {"bunia": "Bunia"}.get(s.strip().lower(), s.strip()))
+
+    assert sorted(out["healtharea"]) == ["Bunia|Aero", "Mambasa|Aero"]
+    assert out["healtharea"]["Bunia|Aero"]["obs"] == [2]
+    assert out["healtharea"]["Mambasa|Aero"]["obs"] == [1]
+    assert sorted(out["healthzone"]) == ["Bunia"]
+
+
+def _ha_geojson(path, features):
+    fc = {"type": "FeatureCollection", "features": [
+        {"type": "Feature",
+         "properties": {"province": prov, "zone": zone, "area": area, "pcode": ""},
+         "geometry": {"type": "Polygon", "coordinates": [[[0, 0], [1, 0], [1, 1], [0, 0]]]}}
+        for prov, zone, area in features
+    ]}
+    path.write_text(json.dumps(fc), encoding="utf-8")
+    return path
+
+
+def test_health_area_boundaries_match_exact_fuzzy_alias_and_refuse_wrong_numbers(tmp_path):
+    geo = _ha_geojson(tmp_path / "ha.geojson", [
+        ("Ituri", "Bunia", "Areo"),
+        ("Ituri", "Bunia", "Simbilyabo"),
+        ("Ituri", "Mongbalu", "Saio"),          # zone spelt differently upstream
+        ("Tshopo", "Monga", "Monga I"),
+        ("Bas-Uele", "Bili", "Bili Centre"),
+        ("Nord-Ubangi", "Bili", "Bili Centre"),
+    ])
+    aliases = tmp_path / "aliases.csv"
+    aliases.write_text("health_zone,health_area,shapefile_zone,shapefile_area\n"
+                       "Bunia,Aero,Bunia,Areo\n", encoding="utf-8")
+    keys = {
+        "Bunia|Aero",              # alias
+        "Bunia|Simbiliabo",        # close spelling
+        "Mongbwalu|Saio",          # zone fuzzy + exact area
+        "Monga|Monga 2",           # number differs -> refused
+        "Monga|Monga 1",           # same number -> accepted
+        "Bili (Bas-Uele)|Bili Centre",
+        "Bunia|Nowhere",           # no candidate
+    }
+
+    fc, stats = ds.match_health_area_boundaries(keys, geo, aliases)
+
+    got = {f["properties"]["key"] for f in fc["features"]}
+    assert got == {"Bunia|Aero", "Bunia|Simbiliabo", "Mongbwalu|Saio",
+                   "Monga|Monga 1", "Bili (Bas-Uele)|Bili Centre"}
+    assert stats == {"areas": 7, "matched": 5}
+    props = {f["properties"]["key"]: f["properties"] for f in fc["features"]}
+    assert props["Bunia|Aero"]["zone"] == "Bunia" and props["Bunia|Aero"]["area"] == "Aero"
+
+
+def test_health_area_polygon_is_claimed_once(tmp_path):
+    geo = _ha_geojson(tmp_path / "ha.geojson", [("Ituri", "Bunia", "Simbilyabo")])
+
+    fc, _ = ds.match_health_area_boundaries(
+        {"Bunia|Simbiliabo", "Bunia|Simbilyabo"}, geo, tmp_path / "none.csv")
+
+    assert [f["properties"]["key"] for f in fc["features"]] == ["Bunia|Simbilyabo"]
+
+
+def test_health_area_boundaries_missing_file_is_tolerated(tmp_path):
+    fc, stats = ds.match_health_area_boundaries({"Bunia|Aero"}, tmp_path / "absent.geojson")
+    assert fc == {"type": "FeatureCollection", "features": []}
+    assert stats == {"areas": 1, "matched": 0}

@@ -23,6 +23,7 @@ Please note that the epidemiological data presented here is based on work in pro
 - **ic_model_estimates.csv** (optional) Imperial College model date and case bounds for the tracker tooltip (`PAYLOAD.ic_model`; independent of INSP sitreps).
 - **caveats.csv** (optional) Per-metric warnings in the title-panel tracker: `metric` (`confirmed_cases`, `suspected_cases`, `confirmed_deaths`, `suspected_deaths`) and `warning` text; adds a mark beside the count and a footnote below.
 - **dashboard_plots/** (optional) The aggregated CSVs the Trends tab charts are drawn from (`manifest.json` + `<date>/{status_aggregated,cumulative_positive_deaths,rolling_positivity,lab_positivity_aggregated}.csv`), produced by [BDBV2026-Processed_Sensitive_Data](https://github.com/INRB-UMIE/BDBV2026-Processed_Sensitive_Data)'s `outputs/` directory. The build reads this directly, no copying into `Data/dashboard_plots/` needed. By default it assumes that repo is cloned as a sibling of this one (`../BDBV2026-Processed_Sensitive_Data/outputs`); set `DASHBOARD_PLOTS_DIR` to override. The same directory also holds pre-rendered SVGs of these charts, which the dashboard **no longer reads** — it draws them client-side from the CSVs instead (see `Scripts/assets/trends.js` and `Scripts/assets/charts.js`). The charts must stay faithful to the *data* produced by `BDBV2026-Processing_Code`'s `4-make-dashboard-plots.R`; their visual style follows the Genomic Epidemiology tab. See `docs/superpowers/specs/2026-09-22-trends-dynamic-charts-design.md`.
+- **health_area_aliases.csv** (optional) Hand-curated fixes for health areas whose line-list name differs from the health-area shapefile by more than a typo (columns `health_zone,health_area,shapefile_zone,shapefile_area`). Used only to attach map outlines to the Trends tab's Health Area scope; see below.
 - **Methods** Methods for dashboard, see below.
 - **ToS** ToS for dashboard, see below. 
 
@@ -42,9 +43,9 @@ is hidden (pinch-to-zoom is used instead) and both panels start collapsed to
 just their title bar, pinned to the top of the map pane.
 
 **Epidemiological Trends** (`trends.html`) — a right-hand rail with
-National / Provincial / Health Zone scope buttons and a location search
+National / Provincial / Health Zone / Health Area scope buttons and a location search
 (matches every province and health zone, regardless of whether a plot
-exists for it) above a scrollable column of plot cards: daily cases by
+exists for it, plus every health area with data, listed as "Area (Zone)") above a scrollable column of plot cards: daily cases by
 symptom onset (shown by default), cumulative deaths, test positivity, and
 per-lab submission subplots, all filtered to the selected scope. The map
 itself animates cumulative confirmed cases over time and autoplays on
@@ -78,6 +79,23 @@ vertically instead of sitting side by side.
 - Every collapsible panel (layer controls, legends, plot cards) plus the
   Current Snapshot zone-details panel auto-collapses to just its title bar
   on load.
+
+### Health Area scope (Trends)
+
+Health-area series come from the `healtharea` rows that
+BDBV2026-Processing_Code's step 3 writes into the same aggregated CSVs.
+Area names repeat across zones, so each area is keyed `"<zone>|<area>"`.
+
+Map outlines come from the health-area shapefile in
+BDBV2026-Processed_Sensitive_Data (`assets/geo/rdc_aires-de-sante/`),
+simplified once by `python Scripts/simplify_health_areas.py` into
+`health_areas_simplified.geojson` beside it (~9.6 MB for all 7,158 DRC areas;
+override the path with `HEALTH_AREA_GEOJSON`). Re-run it only when the
+shapefile changes. The build keeps just the areas that have Trends data.
+Shapefile and line-list names don't always agree; matching is per zone (alias
+file, then exact, then close spelling with numbers required to agree) and the
+build prints how many areas matched. Areas without an outline still have
+charts and are reachable via search.
 
 ## Repository layout
 ```

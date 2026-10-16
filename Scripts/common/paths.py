@@ -83,6 +83,18 @@ ROLLING_POSITIVITY_CSV = Path(
     os.environ.get("ROLLING_POSITIVITY_CSV") or
     (SCRIPT_DIR.parent.parent / "BDBV2026-Phylogenetic_Analyses" / "data" / "rolling_positivity.csv")
 ).resolve()
+# Simplified health-area polygons for the Trends "Health Area" scope, written by
+# Scripts/simplify_health_areas.py next to the source shapefile in
+# BDBV2026-Processed_Sensitive_Data (the boundaries are not copied into this
+# repo; only the areas with Trends data end up in trends.html).
+HEALTH_AREA_GEOJSON = Path(
+    os.environ.get("HEALTH_AREA_GEOJSON") or
+    (DASHBOARD_PLOTS_DIR.parent / "assets" / "geo" / "rdc_aires-de-sante"
+     / "health_areas_simplified.geojson")
+).resolve()
+# Hand-curated line-list -> shapefile name fixes for health areas whose names
+# differ by more than a typo (see match_health_area_boundaries()).
+HEALTH_AREA_ALIASES_CSV = DATA_ROOT / "health_area_aliases.csv"
 SIT_REPS_DIR     = DATA_ROOT / "Epidemiological Data"
 METHODS_DOCX     = DATA_ROOT / "Methods" / "Contributors_Methods_Data_website.docx"
 METHODS_DOCX_FR  = DATA_ROOT / "Methods" / "Contributors_Methods_Data_website_fr.docx"

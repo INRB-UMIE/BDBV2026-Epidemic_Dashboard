@@ -42,7 +42,7 @@ from common.paths import (
     METHODS_DOCX, METHODS_DOCX_FR, METHODS_HTML_FR, TERMS_TXT, TERMS_TXT_FR,
     BRANDING_DIR, BRANDING_URLS, THEME_CSS, LOCALES_DIR, SUPPORTED_LANGS,
     OUTPUT_DIR, GENOMIC_DIR, PHYLOGENIES_DIR, BEAST_NE_DIR,
-    ROLLING_POSITIVITY_CSV,
+    ROLLING_POSITIVITY_CSV, HEALTH_AREA_GEOJSON, HEALTH_AREA_ALIASES_CSV,
 )
 from common.phylo_tree import prepare_phylo_tree_products, resolve_latest_phylogeny_tree
 from common.beast_ne import load_beast_ne_products, ne_stale_relative_to_tree
@@ -3985,8 +3985,23 @@ _STATUS_AGG_CSV_NAME = "status_aggregated.csv"
 # rows while deaths/positivity OVERWRITE (last row wins), and only cases skip
 # zero-total locations. That is what the generator does.
 
-_TRENDS_SCALES = (("national", None), ("province", "province"), ("healthzone", "health_zone"))
+_TRENDS_SCALES = (
+    ("national", None),
+    ("province", "province"),
+    ("healthzone", "health_zone"),
+    # Health-area rows also carry health_zone: area names are NOT unique
+    # nationally (the same name recurs in different zones), so the location key
+    # is "<canonical zone nom>|<area>". See trends_health_area_key().
+    ("healtharea", "health_area"),
+)
 _TRENDS_EPOCH = "2026-01-01"
+# Separator inside a health-area location key. engine.js/trends.js split on it
+# to show "Area (Zone)"; keep the two in step.
+TRENDS_HEALTH_AREA_SEP = "|"
+# Positivity is a proportion; the charts show it to 0.1 percentage points, so 4
+# decimals (0.01 pp) loses nothing visible while cutting the payload by more
+# than half (R writes ~15 significant digits).
+_POSITIVITY_DECIMALS = 4
 # Built once rather than per CSV row -- every packer looks a scale up in its
 # inner loop.
 _TRENDS_SCALE_MAP = dict(_TRENDS_SCALES)
@@ -4022,6 +4037,11 @@ def _trends_scale_loc(row, canon):
     loc = _trends_loc(row, key_field)
     if loc is None:
         return None
+    if key_field == "health_area":
+        zone = _trends_loc(row, "health_zone")
+        if zone is None:
+            return None              # an area without its zone is ambiguous
+        return scale, trends_health_area_key(canon(zone), loc)
     if key_field == "health_zone":
         # canon maps to canonical health-zone noms, so it applies to
         # zones ONLY. Province names are a different namespace; several
@@ -4030,6 +4050,16 @@ def _trends_scale_loc(row, canon):
         # rewrite a province to a zone's spelling if the two ever drift.
         loc = canon(loc)
     return scale, loc
+
+
+def trends_health_area_key(zone, area):
+    """Location key for one health area: "<zone nom>|<area>"."""
+    return f"{zone}{TRENDS_HEALTH_AREA_SEP}{area}"
+
+
+def _round_prop(value):
+    """A positivity proportion rounded for the payload; None passes through."""
+    return None if value is None else round(value, _POSITIVITY_DECIMALS)
 
 
 def _i0(value):
@@ -4136,8 +4166,9 @@ def _pack_trends_positivity(path, canon=None):
     connects straight across gaps (geom_line does); zero-filling here would
     invent troughs that are not in the data.
 
-    Values are proportions at full precision. The x100 to percent happens at
-    render time so the stored numbers stay byte-identical to the source.
+    Values are proportions rounded to _POSITIVITY_DECIMALS (4 dp = 0.01
+    percentage points; the charts display 0.1). The x100 to percent happens at
+    render time.
     """
     canon = canon or (lambda s: s)
     buckets = {scale: {} for scale, _ in _TRENDS_SCALES}
@@ -4151,9 +4182,9 @@ def _pack_trends_positivity(path, canon=None):
             if not _ISO_DATE_RE.match(day):
                 continue
             trio = (
-                _parse_optional_float(row.get("daily_positivity_mean")),
-                _parse_optional_float(row.get("daily_positivity_lower")),
-                _parse_optional_float(row.get("daily_positivity_upper")),
+                _round_prop(_parse_optional_float(row.get("daily_positivity_mean"))),
+                _round_prop(_parse_optional_float(row.get("daily_positivity_lower"))),
+                _round_prop(_parse_optional_float(row.get("daily_positivity_upper"))),
             )
             if trio[0] is None:
                 continue
@@ -4269,9 +4300,9 @@ def _pack_trends_labs(path):
             })
             lab["rows"][day] = (
                 _i0(row.get("total_samples_analysed_daily")),
-                mean,
-                _parse_optional_float(row.get("daily_positivity_lower")),
-                _parse_optional_float(row.get("daily_positivity_upper")),
+                _round_prop(mean),
+                _round_prop(_parse_optional_float(row.get("daily_positivity_lower"))),
+                _round_prop(_parse_optional_float(row.get("daily_positivity_upper"))),
             )
 
     labs, starts, ends = [], [], []
@@ -4338,7 +4369,174 @@ def _trends_x_limits(cases, deaths, positivity):
     return limits
 
 
-def load_trends_series(outputs_dir=None, known_noms=None):
+# --- Health-area boundaries for the Trends "Health Area" scope ---------------
+# The source polygons come from the health-area shapefile in
+# BDBV2026-Processed_Sensitive_Data, pre-simplified by
+# Scripts/simplify_health_areas.py. Its names do not always agree with the
+# DHIS2 line list, so matching runs in four passes, all within one health zone:
+#   1. Data/health_area_aliases.csv (hand-curated; wins over everything)
+#   2. exact match on a folded key (accents, case, punctuation ignored)
+#   3. close spelling match (difflib >= 0.8), refused when the two names carry
+#      different numbers ("Monga 2" must not land on "Monga I")
+# and each polygon is claimed at most once. Areas with no match still get
+# charts and are still searchable; they just have no polygon to click.
+
+_HA_FUZZY_CUTOFF = 0.8
+_HA_ZONE_FUZZY_CUTOFF = 0.85
+_ROMAN = {"i": 1, "ii": 2, "iii": 3, "iv": 4, "v": 5, "vi": 6, "vii": 7, "viii": 8, "ix": 9, "x": 10}
+
+
+def _ha_key(s) -> str:
+    """Folded, space-separated key (unlike _norm, keeps word boundaries so
+    numbered areas can be compared)."""
+    folded = unicodedata.normalize("NFKD", str(s or ""))
+    folded = "".join(ch for ch in folded if not unicodedata.combining(ch)).lower()
+    folded = re.sub(r"['`]", "", folded)
+    folded = re.sub(r"[^a-z0-9]+", " ", folded)
+    folded = re.sub(r"(?<=[a-z])(?=\d)|(?<=\d)(?=[a-z])", " ", folded)   # "titule1" -> "titule 1"
+    return re.sub(r"\s+", " ", folded).strip()
+
+
+def _ha_numbers(key: str) -> tuple:
+    out = []
+    for tok in key.split():
+        if tok.isdigit():
+            out.append(int(tok))
+        elif tok in _ROMAN:
+            out.append(_ROMAN[tok])
+    return tuple(out)
+
+
+def _ha_zone_parts(nom: str) -> tuple[str, str]:
+    """('bili', 'bas uele') for 'Bili (Bas-Uele)'; ('bunia', '') for 'Bunia'."""
+    m = re.match(r"^(.*?)\s*\(([^)]*)\)\s*$", nom or "")
+    if m:
+        return _ha_key(m.group(1)), _ha_key(m.group(2))
+    return _ha_key(nom), ""
+
+
+def _load_health_area_aliases(path: Path) -> dict:
+    """{(zone_key, area_key): (shp_zone_key, shp_area_key)} from the alias CSV."""
+    aliases = {}
+    if not path or not Path(path).exists():
+        return aliases
+    with open(path, newline="", encoding="utf-8") as fh:
+        for row in csv.DictReader(fh):
+            z, a = _ha_key(row.get("health_zone")), _ha_key(row.get("health_area"))
+            sz, sa = _ha_key(row.get("shapefile_zone")), _ha_key(row.get("shapefile_area"))
+            if z and a and sz and sa:
+                aliases[(z, a)] = (sz, sa)
+    return aliases
+
+
+def _merge_geometries(geoms: list) -> dict:
+    polys = []
+    for g in geoms:
+        if g["type"] == "Polygon":
+            polys.append(g["coordinates"])
+        elif g["type"] == "MultiPolygon":
+            polys.extend(g["coordinates"])
+    if len(polys) == 1:
+        return {"type": "Polygon", "coordinates": polys[0]}
+    return {"type": "MultiPolygon", "coordinates": polys}
+
+
+def match_health_area_boundaries(area_keys, geojson_path=None, aliases_path=None):
+    """FeatureCollection of the health areas in ``area_keys`` that have a polygon.
+
+    ``area_keys`` are Trends location keys ("<zone nom>|<area>"). Each output
+    feature carries properties {key, zone, area}. Returns (fc, stats).
+    """
+    empty = {"type": "FeatureCollection", "features": []}
+    path = Path(geojson_path) if geojson_path else HEALTH_AREA_GEOJSON
+    if not area_keys:
+        return empty, {"areas": 0, "matched": 0}
+    if not path.exists():
+        print(f"  NOTE: health-area boundaries not found at {path}; "
+              "run Scripts/simplify_health_areas.py. Health areas will have no map polygons.")
+        return empty, {"areas": len(area_keys), "matched": 0}
+    try:
+        src = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        print(f"  WARNING: unreadable health-area boundaries {path}: {exc}")
+        return empty, {"areas": len(area_keys), "matched": 0}
+
+    # Group source polygons by (zone, area). A few areas are split across two
+    # records in the shapefile; merge those into one MultiPolygon.
+    by_zone: dict[str, dict[str, list]] = {}
+    zone_province: dict[str, set] = {}
+    for feat in src.get("features") or []:
+        props = feat.get("properties") or {}
+        zk, ak = _ha_key(props.get("zone")), _ha_key(props.get("area"))
+        if not zk or not ak or not feat.get("geometry"):
+            continue
+        by_zone.setdefault(zk, {}).setdefault(ak, []).append(feat["geometry"])
+        zone_province.setdefault(zk, set()).add(_ha_key(props.get("province")))
+    shp_zones = list(by_zone)
+
+    aliases = _load_health_area_aliases(
+        Path(aliases_path) if aliases_path else HEALTH_AREA_ALIASES_CSV)
+
+    def resolve_zone(zone_nom):
+        zk, prov = _ha_zone_parts(zone_nom)
+        if zk in by_zone:
+            return zk
+        near = difflib.get_close_matches(zk, shp_zones, n=3, cutoff=_HA_ZONE_FUZZY_CUTOFF)
+        if prov:
+            near = [z for z in near if prov in zone_province.get(z, set())] or near
+        return near[0] if near else None
+
+    # Requests grouped by shapefile zone so one-to-one claiming is per zone.
+    wanted: dict[str, list] = {}
+    for key in sorted(area_keys):
+        zone_nom, _, area = key.partition(TRENDS_HEALTH_AREA_SEP)
+        zk_raw = _ha_zone_parts(zone_nom)[0]
+        ak = _ha_key(area)
+        alias = aliases.get((zk_raw, ak))
+        if alias and alias[0] in by_zone and alias[1] in by_zone[alias[0]]:
+            wanted.setdefault(alias[0], []).append((key, alias[1], "alias"))
+            continue
+        zk = resolve_zone(zone_nom)
+        if zk is not None and ak:
+            wanted.setdefault(zk, []).append((key, ak, "name"))
+
+    matched = {}
+    for zk, reqs in wanted.items():
+        pool = by_zone[zk]
+        claimed = set()
+        pending = []
+        for key, ak, how in reqs:                      # aliases + exact first
+            if ak in pool and ak not in claimed:
+                matched[key] = pool[ak]
+                claimed.add(ak)
+            elif how == "name":
+                pending.append((key, ak))
+        scored = []
+        for key, ak in pending:
+            for cand in difflib.get_close_matches(ak, list(pool), n=3, cutoff=_HA_FUZZY_CUTOFF):
+                if _ha_numbers(cand) != _ha_numbers(ak):
+                    continue
+                scored.append((difflib.SequenceMatcher(None, ak, cand).ratio(), key, cand))
+        for _score, key, cand in sorted(scored, reverse=True):
+            if key in matched or cand in claimed:
+                continue
+            matched[key] = pool[cand]
+            claimed.add(cand)
+
+    features = []
+    for key in sorted(matched):
+        zone_nom, _, area = key.partition(TRENDS_HEALTH_AREA_SEP)
+        features.append({
+            "type": "Feature",
+            "properties": {"key": key, "zone": zone_nom, "area": area},
+            "geometry": _merge_geometries(matched[key]),
+        })
+    return ({"type": "FeatureCollection", "features": features},
+            {"areas": len(area_keys), "matched": len(features)})
+
+
+def load_trends_series(outputs_dir=None, known_noms=None, health_area_geojson=None,
+                       health_area_aliases=None):
     """The Trends tab's data slice, or None when the snapshot is unavailable.
 
     Uses the same directory and manifest-driven snapshot resolution as the
@@ -4396,6 +4594,14 @@ def load_trends_series(outputs_dir=None, known_noms=None):
     def slice_of(packed, scale):
         return packed.get(scale, {}) if packed else {}
 
+    area_keys = (set(slice_of(cases, "healtharea")) | set(slice_of(deaths, "healtharea"))
+                 | set(slice_of(positivity, "healtharea")))
+    ha_boundaries, ha_stats = match_health_area_boundaries(
+        area_keys, health_area_geojson, health_area_aliases)
+    if area_keys:
+        print(f"  trends health areas: {ha_stats['matched']}/{ha_stats['areas']} "
+              "matched to a map polygon")
+
     return {
         "asof": asof,
         "incomplete_days": incomplete_days,
@@ -4404,20 +4610,26 @@ def load_trends_series(outputs_dir=None, known_noms=None):
             "national": slice_of(cases, "national").get("national"),
             "provinces": slice_of(cases, "province"),
             "health_zones": slice_of(cases, "healthzone"),
+            "health_areas": slice_of(cases, "healtharea"),
         },
         "deaths": {
             "national": slice_of(deaths, "national").get("national"),
             "provinces": slice_of(deaths, "province"),
             "health_zones": slice_of(deaths, "healthzone"),
+            "health_areas": slice_of(deaths, "healtharea"),
         },
         "positivity": {
             "national": slice_of(positivity, "national").get("national"),
             "provinces": slice_of(positivity, "province"),
             "health_zones": slice_of(positivity, "healthzone"),
+            "health_areas": slice_of(positivity, "healtharea"),
         },
         "labs": labs,
         "lab_x": lab_x,
         "x_limits": _trends_x_limits(cases, deaths, positivity),
+        # Only the matched areas' polygons; lives inside the trends slice so it
+        # inherits that slice's page scoping (trends.html only).
+        "health_area_boundaries": ha_boundaries,
     }
 
 

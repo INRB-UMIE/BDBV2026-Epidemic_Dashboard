@@ -112,6 +112,7 @@ def build_shared_payload() -> dict:
     if trends:
         print(f"  trends: asof {trends['asof']}, "
               f"{len(trends['cases']['health_zones'])} zones, "
+              f"{len(trends['cases']['health_areas'])} health areas, "
               f"{len(trends['labs'])} labs, "
               f"incomplete from {trends['incomplete_from']}")
     _eff_active = {n for n, r in zone_data.items()

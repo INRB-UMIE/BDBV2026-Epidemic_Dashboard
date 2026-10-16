@@ -342,6 +342,8 @@ __NAV_LINKS__
               data-i18n="ui.trends_scope_province">Provincial</button>
       <button type="button" class="trends-scope-btn" data-scope="health_zone"
               data-i18n="ui.trends_scope_health_zone">Health Zone</button>
+      <button type="button" class="trends-scope-btn" data-scope="health_area"
+              data-i18n="ui.trends_scope_health_area">Health Area</button>
     </div>
   </div>
   <div id="trends-plots-column">
