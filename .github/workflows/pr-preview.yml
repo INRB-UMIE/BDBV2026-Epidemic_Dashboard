@@ -120,6 +120,14 @@ jobs:
           path: BDBV2026-Processed_Sensitive_Data
           token: ${{ secrets.EXTERNAL_REPO_TOKEN }}
 
+      # Spatial invasion-risk model outputs (public). outputs/latest.json names
+      # the run the Spatial risk tab reads (see _latest_invasion_risk_run).
+      - name: Checkout spatial invasion risk repo
+        uses: actions/checkout@v4
+        with:
+          repository: INRB-UMIE/BDBV2026-Spatial_Invasion_Risk
+          path: BDBV2026-Spatial_Invasion_Risk
+
       # Genomic-epi producer (public) — optional Ne sidecars when tipCount matches.
       - name: Checkout genomic-epi producer repo
         if: github.event.action != 'closed'
@@ -160,6 +168,7 @@ jobs:
           BUILD_DIR: ${{ github.workspace }}/BDBV2026-Data/build
           DATA_ROOT: ${{ github.workspace }}/Data
           DASHBOARD_PLOTS_DIR: ${{ github.workspace }}/BDBV2026-Processed_Sensitive_Data/outputs
+          SPATIAL_INVASION_RISK_DIR: ${{ github.workspace }}/BDBV2026-Spatial_Invasion_Risk
           GENOMIC_DIR: ${{ github.workspace }}/BDBV2026-Genomic_Epi/public/data
           PHYLOGENIES_DIR: ${{ github.workspace }}/BDBV2026-Phylogenetic_Analyses/data/phylogenies
           BEAST_NE_DIR: ${{ github.workspace }}/BDBV2026-Phylogenetic_Analyses/outputs/beast
