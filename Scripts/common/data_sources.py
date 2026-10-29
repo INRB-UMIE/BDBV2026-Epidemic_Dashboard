@@ -39,6 +39,7 @@ from common.paths import (
     FLOWMINDER_SHORT_TRIPS_PROCESSED, OSRM_PROCESSED, OSRM_TRAVEL_TIME_CSV,
     OSRM_ROAD_DISTANCE_CSV, DATA_REPO, METADATA_CSV, IC_MODEL_CSV,
     CAVEATS_CSV, INVASION_RISK_CSV, DASHBOARD_PLOTS_DIR, SIT_REPS_DIR,
+    SPATIAL_INVASION_RISK_DIR,
     METHODS_DOCX, METHODS_DOCX_FR, METHODS_HTML_FR, TERMS_TXT, TERMS_TXT_FR,
     BRANDING_DIR, BRANDING_URLS, THEME_CSS, LOCALES_DIR, SUPPORTED_LANGS,
     OUTPUT_DIR, GENOMIC_DIR, PHYLOGENIES_DIR, BEAST_NE_DIR,
@@ -133,6 +134,7 @@ __all__ = [
     '_parse_flexible_date',
     '_SPATIOTEMPORAL_DATE_RE',
     '_latest_spatiotemporal_key_outputs_dir',
+    '_latest_invasion_risk_run',
     'load_invasion_risk_estimates',
     'load_bayes_import_force_pairwise',
     'load_harmonised_confirmed_cases',
@@ -1395,15 +1397,74 @@ def _latest_spatiotemporal_key_outputs_dir() -> Path | None:
     return candidates[-1][1]
 
 
+def _latest_invasion_risk_run() -> tuple[Path, Path | None] | None:
+    """(risk_scores_csv, run_info_json) for the current invasion-risk run.
+
+    Primary source: BDBV2026-Spatial_Invasion_Risk. Its ``outputs/latest.json``
+    names the current run, e.g.::
+
+        {"latest_analysis_date": "2026-10-28",
+         "path": "outputs/2026-10-28",
+         "risk_scores": "outputs/2026-10-28/bayes_risk_scores_all_zones.csv",
+         "run_info": "outputs/2026-10-28/run_info.json", ...}
+
+    Paths in latest.json are relative to the repo root. ``risk_scores`` /
+    ``run_info`` are used when present, else they're derived from ``path``.
+
+    Falls back to the newest BDBV2026-Processed_Sensitive_Data
+    ``<date>/spatiotemporal/key_outputs/`` (the previous source) when the
+    Spatial_Invasion_Risk checkout or its latest.json is missing/unusable.
+    """
+    root = SPATIAL_INVASION_RISK_DIR
+    latest_path = root / "outputs" / "latest.json"
+    if latest_path.exists():
+        try:
+            latest = json.loads(latest_path.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError) as exc:
+            print(f"  WARNING: could not read {latest_path}: {exc}")
+            latest = None
+        if isinstance(latest, dict):
+            run_dir = latest.get("path")
+            risk_rel = latest.get("risk_scores") or (
+                f"{run_dir}/bayes_risk_scores_all_zones.csv" if run_dir else None)
+            info_rel = latest.get("run_info") or (
+                f"{run_dir}/run_info.json" if run_dir else None)
+            if risk_rel:
+                risk_csv = (root / risk_rel).resolve()
+                if risk_csv.exists():
+                    run_info = (root / info_rel).resolve() if info_rel else None
+                    if run_info is not None and not run_info.exists():
+                        run_info = None
+                    print(f"  invasion risk run (latest.json): "
+                          f"{latest.get('latest_analysis_date') or risk_csv.parent.name}")
+                    return risk_csv, run_info
+                print(f"  WARNING: latest.json points at {risk_rel}, "
+                      "which does not exist")
+            else:
+                print(f"  WARNING: {latest_path} has no risk_scores/path entry")
+        print("  WARNING: falling back to BDBV2026-Processed_Sensitive_Data "
+              "for invasion risk")
+    else:
+        print(f"  NOTE: {latest_path} not found; "
+              "falling back to BDBV2026-Processed_Sensitive_Data for invasion risk")
+
+    ko = _latest_spatiotemporal_key_outputs_dir()
+    if ko is None:
+        return None
+    run_info = ko / "run_info.json"
+    return ko / "bayes_risk_scores_all_zones.csv", (run_info if run_info.exists() else None)
+
+
 def load_invasion_risk_estimates(effective_active_noms: set[str] | None = None) -> dict | None:
     """Load Bayesian invasion-risk scores for the Epidemiological trends tab.
 
     Prefers ``horizon == 1`` (next forecast window). Zone names are expected to
     match GeoJSON ``nom`` values.
 
-    Primary source: the newest dated
-    ``spatiotemporal/key_outputs/bayes_risk_scores_all_zones.csv`` under
-    BDBV2026-Processed_Sensitive_Data/outputs -- the model-selected
+    Primary source: the run named by BDBV2026-Spatial_Invasion_Risk's
+    ``outputs/latest.json`` (see _latest_invasion_risk_run, which falls back
+    to the newest dated ``spatiotemporal/key_outputs/`` under
+    BDBV2026-Processed_Sensitive_Data/outputs) -- the model-selected
     ("featured") method's per-zone forecast for that pipeline run. That CSV
     has no ``cutoff_date`` column (unlike the legacy
     Data/invasion_risk_model_estimates.csv it replaces), so it's backfilled
@@ -1426,18 +1487,17 @@ def load_invasion_risk_estimates(effective_active_noms: set[str] | None = None) 
     for horizon=1 and understates the span by 6 days for horizon=2. See the
     comment at forecast_start_date/forecast_end_date below.
 
-    Falls back to the legacy CSV if no spatiotemporal output is found (e.g.
-    local dev without BDBV2026-Processed_Sensitive_Data checked out); in that
+    Falls back to the legacy CSV if neither source is found (e.g. local dev
+    with neither sibling repo checked out); in that
     fallback, cutoff_date/forecast_end_date keep the old CSV-column /
     arithmetic behaviour (no run_info.json equivalent exists there).
     """
     source_path: Path | None = None
     cutoff_override = None
-    key_outputs_dir = _latest_spatiotemporal_key_outputs_dir()
-    if key_outputs_dir is not None:
-        source_path = key_outputs_dir / "bayes_risk_scores_all_zones.csv"
-        run_info_path = key_outputs_dir / "run_info.json"
-        if run_info_path.exists():
+    latest_run = _latest_invasion_risk_run()
+    if latest_run is not None:
+        source_path, run_info_path = latest_run
+        if run_info_path is not None:
             try:
                 run_info = json.loads(run_info_path.read_text(encoding="utf-8"))
                 cutoff_override = run_info.get("training_window_end")
@@ -1532,7 +1592,7 @@ def load_invasion_risk_estimates(effective_active_noms: set[str] | None = None) 
     forecast_start_date = None
     forecast_end_date = None
     if cutoff_date is not None:
-        if key_outputs_dir is not None:
+        if latest_run is not None:
             # Only for the new source, where cutoff_date is reliably the last
             # training day -- the legacy CSV's cutoff_date has unverified
             # semantics, so leave forecast_start_date unset there (JS falls
@@ -1615,11 +1675,14 @@ def load_invasion_risk_estimates(effective_active_noms: set[str] | None = None) 
 
 
 def _latest_spatiotemporal_pairwise_csv() -> Path | None:
-    """Pairwise import-force CSV from the SAME dated folder as the risk table.
+    """Pairwise import-force CSV from BDBV2026-Processed_Sensitive_Data.
 
-    Reuses _latest_spatiotemporal_key_outputs_dir() so the arrows and the
-    invasion-risk table always come from one pipeline run. The reports CSV is
-    a sibling of key_outputs: <date>/spatiotemporal/reports/.
+    The invasion-risk table now comes from BDBV2026-Spatial_Invasion_Risk
+    (outputs/latest.json), which does not publish this file, so the arrows
+    still come from the newest Processed_Sensitive_Data run and may be from a
+    different run date than the table (the ``yyyymmdd`` field in the payload
+    records which). The reports CSV is a sibling of key_outputs:
+    <date>/spatiotemporal/reports/.
     """
     ko = _latest_spatiotemporal_key_outputs_dir()
     if ko is None:
@@ -1722,19 +1785,19 @@ def load_bayes_import_force_pairwise() -> dict | None:
 def load_harmonised_confirmed_cases(valid_noms: set[str]) -> dict[str, int]:
     """Per-zone harmonised (line-list ∪ sitrep) cumulative confirmed cases.
 
-    Read from the newest dated
-    ``spatiotemporal/key_outputs/harmonised_confirmed_cases.csv`` (same dir as
-    ``bayes_risk_scores_all_zones.csv``). Keys are GeoJSON ``nom`` after
+    Read from ``harmonised_confirmed_cases.csv`` in the same run folder as
+    ``bayes_risk_scores_all_zones.csv`` (see _latest_invasion_risk_run), so
+    assert_harmonised_coverage always compares one run. Keys are GeoJSON ``nom`` after
     ``_NAME_TO_NOM`` normalisation. Returns {} when the file is absent (the
     dashboard then falls back to sitrep-only ``effective``). Warns on any
     ``health_zone`` that does not match a GeoJSON ``nom``.
     """
-    ko = _latest_spatiotemporal_key_outputs_dir()
-    if ko is None:
-        print("  NOTE: no spatiotemporal key_outputs dir; "
+    latest_run = _latest_invasion_risk_run()
+    if latest_run is None:
+        print("  NOTE: no invasion-risk run found; "
               "harmonised confirmed cases unavailable")
         return {}
-    csv_path = ko / "harmonised_confirmed_cases.csv"
+    csv_path = latest_run[0].parent / "harmonised_confirmed_cases.csv"
     if not csv_path.exists():
         print(f"  NOTE: {csv_path.name} not found; "
               "harmonised confirmed cases unavailable")
