@@ -1217,12 +1217,39 @@
     return { clearSelection: clearAll, selectZone: selectZone };
   }
 
+  // "{n} genomes sampled between {start} and {end}, last updated {updated}".
+  // n = tips on the displayed tree; start/end = earliest/latest ISO sample date
+  // among those tips; updated = the tree drop's dated folder (meta.updated).
+  // Hidden when there are no tips or no parseable sample dates.
+  function renderCoverage(data) {
+    var el = document.getElementById("gen-coverage");
+    if (!el) return;
+    var tips = (data && data.tips) || [];
+    var meta = (data && data.meta) || {};
+    var dates = tips.map(function (tp) { return String(tp.date || "").slice(0, 10); })
+      .filter(function (d) { return /^\d{4}-\d{2}-\d{2}$/.test(d); })
+      .sort();
+    if (!tips.length || !dates.length || typeof tf !== "function") {
+      el.hidden = true;
+      return;
+    }
+    var n = tips.length;
+    el.textContent = tf("ui.genomic.sample_summary", {
+      n: (typeof fmtLocale === "function") ? fmtLocale(n) : n,
+      start: dates[0],
+      end: dates[dates.length - 1],
+      updated: meta.updated || data.data_build_date || dates[dates.length - 1]
+    });
+    el.hidden = false;
+  }
+
   function createGenomicTab(ctx) {
     var data = (ctx && ctx.data) || {};
     var treeApi = null;   // resolved PearTree instance (async); consumed by the coordinator
     var coordinator = null;
     return {
       mount: function () {
+        renderCoverage(data);
         var nePanel = renderNePanel(data);
         var distPanel = renderDistPanel(data);
         var corrPanel = renderCorrPanel(data);
@@ -1235,6 +1262,8 @@
           return t;
         });
       },
+      // Called by engine.js setLang() on a language switch.
+      refreshI18n: function () { renderCoverage(data); },
       getTree: function () { return treeApi; },
       getCoordinator: function () { return coordinator; },
       unmount: function () {
