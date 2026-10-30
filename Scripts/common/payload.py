@@ -115,6 +115,12 @@ def build_shared_payload() -> dict:
               f"{len(trends['cases']['health_areas'])} health areas, "
               f"{len(trends['labs'])} labs, "
               f"incomplete from {trends['incomplete_from']}")
+        ci = trends.get("cases_incomplete")
+        if ci:
+            nat = (ci.get("national") or {}).get("days")
+            print(f"  trends cases band: national {nat} days, "
+                  f"{len(ci['provinces'])} provinces, {len(ci['health_zones'])} zones "
+                  "(per-location, from reporting_backfill/incomplete_windows.json)")
     _eff_active = {n for n, r in zone_data.items()
                    if int(r.get("effective_confirmed_cases") or 0) > 0}
     invasion_risk = load_invasion_risk_estimates(effective_active_noms=_eff_active)

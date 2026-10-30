@@ -4728,6 +4728,91 @@ def match_health_area_boundaries(area_keys, geojson_path=None, aliases_path=None
             {"areas": len(area_keys), "matched": len(features)})
 
 
+# Written next to status_aggregated.csv by BDBV2026-Processing_Code step 6
+# (6-reporting-backfill.R) -- see that repo's pipeline_configs.json,
+# reporting_backfill.incomplete_window.
+_CASES_INCOMPLETE_WINDOWS_REL = Path("reporting_backfill") / "incomplete_windows.json"
+
+
+def _load_cases_incomplete_windows(snap, asof, canon=None):
+    """Per-location incomplete-reporting cutoffs for the CASES card, or None.
+
+    The file gives, per national / province / health zone, how many of the
+    most recent onset days are usually still below a completeness threshold
+    (estimated from how earlier exports filled in). Each entry becomes
+    ``{"days", "from", "source"}`` where ``from`` is ``asof - days``, frozen
+    HERE at build time exactly like the global ``incomplete_from`` (spec 6.7 /
+    D7). Province keys get the same mojibake repair as the case packer; zone
+    keys also go through ``canon`` so they match the cases card's keys. Health
+    areas have no entry of their own -- trends.js uses their zone's.
+
+    Returns None when the file is absent or unusable (e.g. step 6 failed for
+    this run): the cases card then falls back to the global incomplete_from.
+    """
+    path = Path(snap) / _CASES_INCOMPLETE_WINDOWS_REL
+    if not path.exists():
+        print(f"  NOTE: {_CASES_INCOMPLETE_WINDOWS_REL} not found in {Path(snap).name}; "
+              "cases card uses the fixed incomplete window")
+        return None
+    try:
+        raw = json.loads(path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError) as exc:
+        print(f"  WARNING: invalid {_CASES_INCOMPLETE_WINDOWS_REL}: {exc}")
+        return None
+    if not isinstance(raw, dict):
+        return None
+    if raw.get("reference_date") and raw.get("reference_date") != asof:
+        print(f"  WARNING: {_CASES_INCOMPLETE_WINDOWS_REL} is for {raw.get('reference_date')}, "
+              f"snapshot is {asof}; using it anyway")
+
+    canon = canon or (lambda name: name)
+    base = date.fromisoformat(asof)
+
+    def window(entry):
+        if not isinstance(entry, dict):
+            return None
+        try:
+            days = int(entry.get("days"))
+        except (TypeError, ValueError):
+            return None
+        if days <= 0:
+            return None
+        return {
+            "days": days,
+            "from": (base - timedelta(days=days)).isoformat(),
+            "source": str(entry.get("source") or ""),
+        }
+
+    def block(name, key_fn):
+        out = {}
+        entries = raw.get(name)
+        if not isinstance(entries, dict):        # jsonlite writes an empty block as [] or {}
+            return out
+        for loc, entry in entries.items():
+            w = window(entry)
+            if w is not None and loc and str(loc).strip().upper() != "NA":
+                out[key_fn(str(loc).strip())] = w
+        return out
+
+    national = window(raw.get("national"))
+    provinces = block("provinces", _fix_mojibake)
+    health_zones = block("health_zones", lambda s: canon(_fix_mojibake(s)))
+    if national is None and not provinces and not health_zones:
+        return None
+
+    try:
+        threshold = float(raw.get("threshold"))
+    except (TypeError, ValueError):
+        threshold = None
+
+    return {
+        "threshold": threshold,
+        "national": national,
+        "provinces": provinces,
+        "health_zones": health_zones,
+    }
+
+
 def load_trends_series(outputs_dir=None, known_noms=None, health_area_geojson=None,
                        health_area_aliases=None):
     """The Trends tab's data slice, or None when the snapshot is unavailable.
@@ -4784,10 +4869,14 @@ def load_trends_series(outputs_dir=None, known_noms=None, health_area_geojson=No
     # browser: the band would drift as a page ages between builds.
     incomplete_from = (date.fromisoformat(asof) - timedelta(days=incomplete_days)).isoformat()
 
+    # Per-location cutoffs for the CASES card only (onset-date counts), from
+    # Processing_Code step 6. None -> the card keeps the global incomplete_from.
+    cases_incomplete = _load_cases_incomplete_windows(snap, asof, canon)
+
     def slice_of(packed, scale):
         return packed.get(scale, {}) if packed else {}
 
-    area_keys = (set(slice_of(cases, "healtharea")) | set(slice_of(deaths, "healtharea"))
+    area_keys =(set(slice_of(cases, "healtharea")) | set(slice_of(deaths, "healtharea"))
                  | set(slice_of(positivity, "healtharea")))
     ha_boundaries, ha_stats = match_health_area_boundaries(
         area_keys, health_area_geojson, health_area_aliases)
@@ -4799,6 +4888,7 @@ def load_trends_series(outputs_dir=None, known_noms=None, health_area_geojson=No
         "asof": asof,
         "incomplete_days": incomplete_days,
         "incomplete_from": incomplete_from,
+        "cases_incomplete": cases_incomplete,
         "cases": {
             "national": slice_of(cases, "national").get("national"),
             "provinces": slice_of(cases, "province"),
