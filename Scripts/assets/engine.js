@@ -580,6 +580,8 @@ function setLang(lang) {
     if (window.__genomicTab && typeof window.__genomicTab.refreshI18n === "function") {
       window.__genomicTab.refreshI18n();
     }
+  } else if (activeView === "surveillance-testing") {
+    if (window.SurveillanceTab) window.SurveillanceTab.refreshI18n();
   } else {
     // Map view: re-render the focused zone's info box (or the placeholder) in
     // the new language. applyStaticI18n early-returns for a non-empty info box,

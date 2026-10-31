@@ -95,6 +95,13 @@ HEALTH_AREA_GEOJSON = Path(
 # Hand-curated line-list -> shapefile name fixes for health areas whose names
 # differ by more than a typo (see match_health_area_boundaries()).
 HEALTH_AREA_ALIASES_CSV = DATA_ROOT / "health_area_aliases.csv"
+# Contact tracing report outputs (outputs/<DATE>/tables/ -- aggregate tables
+# ONLY; that repo's derived/ folder is person-level and is never read here).
+# Default assumes BDBV2026-Contact_Tracing_Analytics is cloned as a sibling.
+CT_ANALYTICS_OUTPUTS = Path(
+    os.environ.get("CT_ANALYTICS_OUTPUTS") or
+    (SCRIPT_DIR.parent.parent / "BDBV2026-Contact_Tracing_Analytics" / "outputs")
+).resolve()
 SIT_REPS_DIR     = DATA_ROOT / "Epidemiological Data"
 METHODS_DOCX     = DATA_ROOT / "Methods" / "Contributors_Methods_Data_website.docx"
 METHODS_DOCX_FR  = DATA_ROOT / "Methods" / "Contributors_Methods_Data_website_fr.docx"

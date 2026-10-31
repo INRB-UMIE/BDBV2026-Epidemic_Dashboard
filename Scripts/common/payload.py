@@ -15,6 +15,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 
 from common.data_sources import *  # noqa: F401,F403 -- re-export all loaders/constants
+from common.surveillance import load_surveillance
 from common.paths import (
     BUILD_GEOJSON, OSRM_TRAVEL_TIME_CSV, DATA_ROOT, BUILD_DIR,
 )
@@ -115,6 +116,12 @@ def build_shared_payload() -> dict:
               f"{len(trends['cases']['health_areas'])} health areas, "
               f"{len(trends['labs'])} labs, "
               f"incomplete from {trends['incomplete_from']}")
+    surveillance = load_surveillance()
+    if surveillance:
+        ct = surveillance.get("contact_tracing") or {}
+        te = surveillance.get("testing") or {}
+        print(f"  surveillance: CT data cut {ct.get('data_cut', 'missing')}, "
+              f"testing asof {te.get('asof', 'missing')}, {len(te.get('labs') or [])} labs")
     _eff_active = {n for n, r in zone_data.items()
                    if int(r.get("effective_confirmed_cases") or 0) > 0}
     invasion_risk = load_invasion_risk_estimates(effective_active_noms=_eff_active)
@@ -221,6 +228,7 @@ def build_shared_payload() -> dict:
         "genome_markers_available": bool(genome_sequence_markers),
         "province_boundaries": province_boundaries,
         "trends": trends,
+        "surveillance": surveillance,
         "invasion_risk": invasion_risk,
         "import_force_pairwise": import_force_pairwise,
         "phr_context": phr_context_by_lang.get("en", {"national": [], "by_nom": {}}),

@@ -69,6 +69,30 @@ is collapsible and sits bottom-right of the map pane on wide screens
 tab at every screen size. On narrow screens the map and ranked table stack
 vertically instead of sitting side by side.
 
+**Surveillance and Testing** (`surveillance-testing.html`) — no map
+(`MAPLESS_VIEWS` in `common/chrome.py`). A scrolling grid of interactive
+cards drawn by `Scripts/assets/surveillance.js` (on `charts.js`, like the
+Trends tab) from `PAYLOAD.surveillance` (`Scripts/common/surveillance.py`):
+
+- *Contact tracing* (the contact tracing report's Fig 3A–D and 2A–B): new cases
+  and % already known as contacts, % that became source cases, follow-up
+  visits with a result, % of contacts fully followed up by zone and month,
+  patient-journey delays and median delays by week of onset, plus an
+  indicators-by-province table. Read from the **aggregate** tables in
+  BDBV2026-Contact_Tracing_Analytics (`outputs/<latest DATE>/tables/`,
+  override with `CT_ANALYTICS_OUTPUTS`). That repo's step 13
+  (`13_dashboard_tables.py`) writes the `dashboard_*` tables for the panels
+  the report draws from person-level data. Its `derived/` folder is never
+  read. Zone-month follow-up cells with fewer than 10 contacts are dropped
+  before they reach the page.
+- *Testing*: samples tested and 5-day positivity (national / province / zone)
+  and weekly laboratory throughput, from the same `rolling_positivity.csv` and
+  `lab_positivity_aggregated.csv` snapshot as the Trends tab.
+
+CI checks out the contact tracing repo with a `READ_CONTACT_TRACING_ANALYTICS`
+secret (Contents: Read). The step is `continue-on-error`, so without the secret
+the build still succeeds and the contact tracing cards show "no data".
+
 ### Narrow-screen (≤700px) behaviour shared by every page
 
 - The site header collapses to a compact stack; the SitRep/build-info line
@@ -120,7 +144,7 @@ BDBV-Epidemic_Dashboard/
 │       ├── spatial_risk.py          # "Spatial Risk"               -> output/spatial-risk.html
 │       ├── context.py               # "Public Health Context"      -> output/context.html
 │       ├── clinical_symptoms.py     # "Clinical Symptoms" (stub)   -> output/clinical-symptoms.html
-│       ├── surveillance_testing.py  # "Surveillance and Testing" (stub) -> output/surveillance-testing.html
+│       ├── surveillance_testing.py  # "Surveillance and Testing" (map-free) -> output/surveillance-testing.html
 │       └── genomic_epidemiology.py  # "Genomic Epidemiology" (stub) -> output/genomic-epidemiology.html
 ├── layer_config.yaml               # map layer exclusions, labels, palettes (requires PyYAML)
 ├── requirements.txt                # Python dependencies for the build script
@@ -138,7 +162,7 @@ BDBV-Epidemic_Dashboard/
 │   ├── spatial-risk.html           # Spatial Risk
 │   ├── context.html                # Public Health Context
 │   ├── clinical-symptoms.html      # Clinical Symptoms (coming soon)
-│   ├── surveillance-testing.html   # Surveillance and Testing (coming soon)
+│   ├── surveillance-testing.html   # Surveillance and Testing
 │   ├── genomic-epidemiology.html   # Genomic Epidemiology (coming soon)
 │   └── assets/
 │       ├── dashboard.css
@@ -166,8 +190,8 @@ wouldn't need `matrices`/`flow_catalogs`) is a natural follow-up once you
 decide whether Trends/Context should keep their map-click interaction or
 move to a simpler dropdown-based selector.
 
-**"Coming soon" stub pages:** Clinical Symptoms, Surveillance and Testing,
-and Genomic Epidemiology are placeholders (`STUB_VIEWS` in
+**"Coming soon" stub pages:** Clinical Symptoms is a placeholder (Surveillance and
+Testing and Genomic Epidemiology have since been built out) (`STUB_VIEWS` in
 `common/chrome.py`) -- they get the same shared header/tabs/footer chrome
 and the same full map engine/payload underneath (currently hidden via a
 `stub-view` body class) as the four real pages, just showing a "coming

@@ -185,6 +185,21 @@ jobs:
           path: BDBV2026-Phylogenetic_Analyses
           token: ${{ secrets.READ_PHYLOGENETIC_ANALYSES }}
 
+      # Contact tracing analytics repo (private) -- aggregate tables under
+      # outputs/<DATE>/tables/ for the Surveillance and Testing tab. Only
+      # outputs/ is checked out (derived/ is git-ignored there and never
+      # committed). Needs its own READ_CONTACT_TRACING_ANALYTICS secret
+      # (Contents: Read on that repo). continue-on-error: without it the build
+      # still succeeds and the tab's contact tracing cards show "no data".
+      - name: Checkout contact tracing analytics repo
+        continue-on-error: true
+        uses: actions/checkout@v4
+        with:
+          repository: INRB-UMIE/BDBV2026-Contact_Tracing_Analytics
+          path: BDBV2026-Contact_Tracing_Analytics
+          token: ${{ secrets.READ_CONTACT_TRACING_ANALYTICS }}
+          sparse-checkout: outputs
+
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
@@ -213,6 +228,7 @@ jobs:
           PHYLOGENIES_DIR: ${{ github.workspace }}/BDBV2026-Phylogenetic_Analyses/data/phylogenies
           BEAST_NE_DIR: ${{ github.workspace }}/BDBV2026-Phylogenetic_Analyses/outputs/beast
           ROLLING_POSITIVITY_CSV: ${{ github.workspace }}/BDBV2026-Phylogenetic_Analyses/data/rolling_positivity.csv
+          CT_ANALYTICS_OUTPUTS: ${{ github.workspace }}/BDBV2026-Contact_Tracing_Analytics/outputs
           # Substituted into assets/engine.js so CARTO's raster tiles come back
           # unwatermarked. This is a public client-side key -- it is served to
           # every dashboard visitor either way -- held as a repo secret only so
