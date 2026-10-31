@@ -13,10 +13,33 @@ from datetime import datetime, timedelta
 from pathlib import Path
 
 _DATE_DIR_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+# Pipe-delimited FASTA tip label. Quotes are excluded so a closing ' cannot be
+# absorbed into the collection date (that is what collapsed quoted trees to a
+# handful of PearTree leaves).
+_PIPE_TIP_BODY = r"[\w-]+\|PP_[\w.]+(?:\|[^,\):&\[\]'\"]+)*"
+# BEAST drops disagree on quoting. Older files leave the label bare and put the
+# annotation immediately after it:
+#   id|PP_acc|DRC|province|zone|date[&rate=...]
+# full.n982 (2026-10-19) quotes the label and leaves the annotation outside:
+#   'id|PP_acc|DRC|province|zone|date'[&rate=...]
+_QUOTED_TIP_RE = re.compile(rf"'({_PIPE_TIP_BODY})'")
 _TIP_NAME_RE = re.compile(
-    r"([\w-]+\|PP_[\w.]+(?:\|[^,\):&\[]+)*)"
+    rf"({_PIPE_TIP_BODY})"
     r"(\[(?:[^\]]|\[[^\]]*\])*\])?"
 )
+# ``full.n982.GTR_SG.hipstr.tree`` / ``..._n778.GTR...`` — the n-count is how
+# many tips the file claims to contain. ``hipstr_0062`` is not an n-count.
+_FILENAME_TIP_COUNT_RE = re.compile(r"(?:^|[._])n(\d+)(?=[._]|$)")
+# PearTree's Newick tokenizer (bundle function Gl). Leaf count with this split
+# is the number of tips the genomic tab actually draws.
+_PEARTREE_TOKEN_RE = re.compile(
+    r"""\s*('[^']*'|"[^"]*"|;|\(|\)|,|:|=|\[&|\]|\{|\})\s*"""
+)
+# A closing label-quote left inside the date, or a date annotation still
+# wrapped in the label quotes. Either one makes PearTree end the taxon name
+# before the health-zone annotation.
+_BROKEN_DATE_QUOTE_RE = re.compile(r'\[&date="[^"]*\'')
+_DATE_INSIDE_QUOTE_RE = re.compile(r"'[^'\r\n]*\[&date=")
 _HEIGHT_MEDIAN_RE = re.compile(r"height_median=([0-9.eE+-]+)")
 _ISO_DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 _YM_DATE_RE = re.compile(r"^\d{4}-\d{2}$")
@@ -78,8 +101,171 @@ def resolve_latest_phylogeny_tree(*dirs: Path) -> Path | None:
     return candidates[-1][1]
 
 
+def _classify_tip_names(raw: str) -> str:
+    """Return ``quoted``, ``bare``, ``mixed``, or ``none`` for pipe-delimited tips.
+
+    A label is quoted only when single quotes wrap the whole pipe-delimited
+    name. Shorter matches inside that name are not a second, bare label.
+    """
+    quoted = 0
+    quoted_name_at: set[int] = set()
+    for match in _QUOTED_TIP_RE.finditer(raw):
+        quoted += 1
+        quoted_name_at.add(match.start(1))
+    bare = 0
+    for match in _TIP_NAME_RE.finditer(raw):
+        if match.start(1) in quoted_name_at:
+            continue
+        if match.start() > 0 and raw[match.start() - 1] == "'":
+            continue
+        bare += 1
+    if quoted and bare:
+        return "mixed"
+    if quoted:
+        return "quoted"
+    if bare:
+        return "bare"
+    return "none"
+
+
+def _unwrap_quoted_tips(raw: str) -> str:
+    """Drop the single quotes around pipe-delimited tip labels.
+
+    The BEAST annotation that follows the closing quote (``'name'[&rate=...]``)
+    is left in place so the existing rewrite can consume it.
+    """
+    return _QUOTED_TIP_RE.sub(r"\1", raw)
+
+
+def tip_count_from_filename(filename: str) -> int | None:
+    """Return the ``n<tips>`` count declared in a tree filename, if present."""
+    matches = _FILENAME_TIP_COUNT_RE.findall(Path(filename).name)
+    if not matches:
+        return None
+    return int(matches[-1])
+
+
+def count_displayed_tips(nexus: str) -> int:
+    """Count leaves PearTree's Newick tokenizer would draw from ``nexus``.
+
+    Mirrors the bundle's ``Gl`` splitter: single- and double-quoted runs are
+    atomic tokens, and ``[&...]`` comments (including ``{...}`` sets) are not
+    tree structure. A rewritten tree that still has a stray quote inside a
+    date annotation collapses here, which is the failure this count is for.
+    """
+    newick = ""
+    for line in nexus.splitlines():
+        start = line.find("(")
+        if start != -1:
+            newick = line[start:]
+            break
+    if not newick:
+        raise ValueError("no Newick tree found")
+
+    tokens = [tok for tok in _PEARTREE_TOKEN_RE.split(newick) if tok]
+    level = 0
+    node: dict | None = None
+    stack: list[dict] = []
+    after_close = False
+    expect_length = False
+    in_annotation = False
+    expect_key = True
+    ann_key: str | None = None
+    in_set = False
+
+    for tok in tokens:
+        if in_annotation:
+            if tok == "=":
+                expect_key = False
+            elif tok == ",":
+                if not in_set:
+                    expect_key = True
+            elif tok == "{":
+                in_set = True
+                if node is not None and ann_key is not None:
+                    node.setdefault("annotations", {})[ann_key] = []
+            elif tok == "}":
+                in_set = False
+            elif tok == "]":
+                in_annotation = False
+                expect_key = True
+            else:
+                value = tok
+                if value[:1] in "\"'":
+                    value = value[1:]
+                if value[-1:] in "\"'":
+                    value = value[:-1]
+                if node is None:
+                    continue
+                annotations = node.setdefault("annotations", {})
+                if expect_key:
+                    ann_key = value.replace(".", "_", 1)
+                elif in_set and ann_key is not None:
+                    bucket = annotations.setdefault(ann_key, [])
+                    if isinstance(bucket, list):
+                        bucket.append(value)
+                elif ann_key is not None:
+                    annotations[ann_key] = value
+            continue
+        if tok == "(":
+            child: dict = {"children": [], "annotations": {}}
+            level += 1
+            if node is not None:
+                stack.append(node)
+            node = child
+            after_close = False
+        elif tok == ",":
+            after_close = False
+            parent = stack.pop()
+            parent["children"].append(node)
+            node = parent
+        elif tok == ")":
+            after_close = False
+            parent = stack.pop()
+            parent["children"].append(node)
+            level -= 1
+            node = parent
+            after_close = True
+        elif tok == ":":
+            after_close = False
+            expect_length = True
+        elif tok == ";":
+            if level > 0:
+                raise ValueError(f"unbalanced brackets (depth {level})")
+            break
+        elif tok == "[&":
+            in_annotation = True
+            expect_key = True
+            in_set = False
+        elif expect_length:
+            expect_length = False
+        elif after_close:
+            after_close = False
+        else:
+            if node is not None:
+                node.setdefault("children", [])
+                stack.append(node)
+            node = {"name": tok, "children": [], "annotations": {}}
+    if level > 0:
+        raise ValueError(f"unbalanced brackets at end of tree (depth {level})")
+    if node is None:
+        return 0
+
+    leaves = 0
+    pending = [node]
+    while pending:
+        current = pending.pop()
+        kids = current.get("children") or []
+        if kids:
+            pending.extend(kids)
+        else:
+            leaves += 1
+    return leaves
+
+
 def _parse_fasta_header(name: str) -> tuple[str, str, str]:
     """Parse a pipe-delimited tip name → (accession, health_zone, date_raw)."""
+    name = name.strip().strip("'\"").strip()
     parts = name.split("|")
     if len(parts) >= 6:
         return parts[1].strip(), parts[4].strip(), parts[-1].strip()
@@ -111,9 +297,64 @@ def _infer_meta_dates(raw_nexus: str, tip_dates: list[str]) -> tuple[str, str]:
     return iso_dates[0], most_recent
 
 
+def _assert_tip_quotes_readable(tree_path: Path, nexus: str, quoting: str) -> None:
+    """Reject a rewritten tree whose quotes PearTree cannot read as labels.
+
+    This does not depend on an ``n<count>`` token in the filename. A tree with
+    no tip count in its name is still imported only when its quotation marks
+    leave each date annotation outside the taxon name.
+    """
+    if _BROKEN_DATE_QUOTE_RE.search(nexus) or _DATE_INSIDE_QUOTE_RE.search(nexus):
+        raise ValueError(
+            f"{tree_path.name}: tip quotation marks cannot be read "
+            f"(tip names were {quoting})"
+        )
+
+
+def _require_displayed_tip_count(tree_path: Path, nexus: str, extracted: int, quoting: str) -> int:
+    """Fail the build if quotes are unreadable or the rewrite drops tips.
+
+    A filename ``n<count>`` token is checked against the drawn tip count only
+    when that token is present. Trees whose names do not declare a tip count
+    are still imported, after the quotation-mark check.
+    """
+    _assert_tip_quotes_readable(tree_path, nexus, quoting)
+    try:
+        displayed = count_displayed_tips(nexus)
+    except ValueError as exc:
+        raise ValueError(
+            f"{tree_path.name}: rewritten tree is not readable "
+            f"(tip names were {quoting}): {exc}"
+        ) from exc
+    # Fewer leaves than labels means the rewrite broke Newick (the quoted-date
+    # failure mode). That check does not depend on the filename.
+    if displayed < extracted:
+        raise ValueError(
+            f"{tree_path.name}: PearTree would display {displayed} tips "
+            f"but {extracted} tip labels were read (tip names were {quoting})"
+        )
+    declared = tip_count_from_filename(tree_path.name)
+    if declared is not None and displayed != declared:
+        raise ValueError(
+            f"{tree_path.name}: filename declares n{declared} tips "
+            f"but {displayed} tips would be displayed (tip names were {quoting})"
+        )
+    return displayed
+
+
 def prepare_phylo_tree_products(tree_path: Path) -> dict:
-    """Read a raw phylo ``.tree`` and return dashboard-ready tree/tips/meta."""
+    """Read a raw phylo ``.tree`` and return dashboard-ready tree/tips/meta.
+
+    Quoted and bare pipe-delimited tip labels are both accepted. Quoted labels
+    are unwrapped before annotation rewrite so PearTree does not treat the
+    closing quote as the end of the taxon name. The rewritten tree is always
+    checked for readable quotation marks. When the filename says ``n<N>``, the
+    drawn tip count is checked against that number as well.
+    """
     raw = tree_path.read_text(encoding="utf-8")
+    quoting = _classify_tip_names(raw)
+    if quoting in ("quoted", "mixed"):
+        raw = _unwrap_quoted_tips(raw)
     folder_date = tree_path.parent.name if _DATE_DIR_RE.match(tree_path.parent.name) else ""
 
     tips: list[dict] = []
@@ -163,12 +404,16 @@ def prepare_phylo_tree_products(tree_path: Path) -> dict:
     if "BEGIN TREES" not in tree and "Begin trees" in tree:
         tree = tree.replace("Begin trees;", "BEGIN TREES;").replace("End;", "END;")
 
+    displayed = _require_displayed_tip_count(tree_path, tree, len(tips), quoting)
+    declared = tip_count_from_filename(tree_path.name)
+    declared_note = f", filename n{declared}" if declared is not None else ""
+    print(f"  genomic tip names ({quoting}): {displayed} displayed{declared_note}")
     meta = {
         "mostRecentDate": most_recent,
         "rootDate": root_date,
         "sourceTree": tree_path.name,
         "updated": folder_date or tree_path.stat().st_mtime,
-        "tipCount": len(tips),
+        "tipCount": displayed,
     }
     if isinstance(meta["updated"], float):
         meta["updated"] = datetime.fromtimestamp(meta["updated"]).strftime("%Y-%m-%d")

@@ -39,6 +39,112 @@ def test_prepare_phylo_tree_products_adds_dashboard_annotations(tmp_path):
     assert out["meta"]["tipCount"] == 3
     assert 'health_zone="Bunia"' in out["tree"]
     assert 'accession="PP_006XHKB.2"' in out["tree"]
+    # Quoted labels must not leave the closing quote inside the date attribute.
+    assert '[&date="2026-05-03",' in out["tree"]
+    assert "2026-05-03'" not in out["tree"]
+    assert phylo.count_displayed_tips(out["tree"]) == 3
+
+
+def test_prepare_phylo_tree_products_unwraps_quoted_beast_labels(tmp_path):
+    """2026-10-19 style: 'pipe-name'[&rate=...] must draw one tip per label."""
+    nexus = (
+        "#NEXUS\nBegin trees;\n"
+        "tree TREE1 = [&R] ("
+        "'BIA-642|PP_00763UP.1|DRC|Ituri|Nyakunde|2026-05-27'"
+        "[&rate=0.001,rate_95%_HPD={0.0009,0.0012}]:0.08,"
+        "'MG-0073|PP_007EVWB.1|DRC|Ituri|Mongbwalu|2026-06-06'"
+        "[&rate=0.002]:0.11);\nEnd;\n"
+    )
+    tree_path = tmp_path / "2026-10-19" / "full.n2.GTR_SG.hipstr.tree"
+    tree_path.parent.mkdir(parents=True)
+    tree_path.write_text(nexus, encoding="utf-8")
+    assert phylo._classify_tip_names(nexus) == "quoted"
+    out = phylo.prepare_phylo_tree_products(tree_path)
+    assert out["meta"]["tipCount"] == 2
+    assert out["tips"][0]["id"] == "PP_00763UP.1"
+    assert out["tips"][0]["date"] == "2026-05-27"
+    assert "[&date=\"2026-05-27\"," in out["tree"]
+    assert "2026-05-27'" not in out["tree"]
+    assert phylo.count_displayed_tips(out["tree"]) == 2
+
+
+def test_prepare_phylo_tree_products_rejects_filename_tip_count_mismatch(tmp_path):
+    nexus = (
+        "#NEXUS\nBegin trees;\n"
+        "tree TREE1 = [&R] ("
+        "BIA-642|PP_00763UP.1|DRC|Ituri|Nyakunde|2026-05-27:0.08,"
+        "MG-0073|PP_007EVWB.1|DRC|Ituri|Mongbwalu|2026-06-06:0.11);\nEnd;\n"
+    )
+    tree_path = tmp_path / "2026-10-19" / "full.n9.GTR_SG.hipstr.tree"
+    tree_path.parent.mkdir(parents=True)
+    tree_path.write_text(nexus, encoding="utf-8")
+    try:
+        phylo.prepare_phylo_tree_products(tree_path)
+    except ValueError as exc:
+        assert "n9" in str(exc)
+        assert "2" in str(exc)
+    else:
+        raise AssertionError("filename n9 vs 2 displayed tips should fail the build")
+
+
+def test_quoted_tree_without_filename_tip_count_is_still_quote_checked(tmp_path):
+    """No ``n<count>`` in the name still requires readable quotation marks."""
+    nexus = (
+        "#NEXUS\nBegin trees;\n"
+        "tree TREE1 = [&R] ("
+        "'BIA-642|PP_00763UP.1|DRC|Ituri|Nyakunde|2026-05-27'"
+        "[&rate=0.001]:0.08);\nEnd;\n"
+    )
+    tree_path = tmp_path / "2026-10-19" / "Ituri.ebds.hipstr.tree"
+    tree_path.parent.mkdir(parents=True)
+    tree_path.write_text(nexus, encoding="utf-8")
+    assert phylo.tip_count_from_filename(tree_path.name) is None
+    out = phylo.prepare_phylo_tree_products(tree_path)
+    assert out["meta"]["tipCount"] == 1
+    assert "[&date=\"2026-05-27\"," in out["tree"]
+    assert "2026-05-27'" not in out["tree"]
+
+    broken = (
+        "#NEXUS\nBEGIN TREES;\n"
+        "tree TREE1 = [&R] ('PP_00763UP.1[&date=\"2026-05-27'\","
+        "accession=\"PP_00763UP.1\",location=\"Nyakunde\","
+        "health_zone=\"Nyakunde\"]:0.08);\nEND;\n"
+    )
+    bare_name = tmp_path / "Ituri.ebds.hipstr.tree"
+    try:
+        phylo._require_displayed_tip_count(bare_name, broken, extracted=1, quoting="quoted")
+    except ValueError as exc:
+        assert "quotation marks" in str(exc)
+    else:
+        raise AssertionError("unreadable quotes should fail even without an n-count")
+
+
+def test_prepare_phylo_tree_products_imports_when_filename_has_no_tip_count(tmp_path):
+    """No ``n<count>`` in the filename is not a reason to skip the tree."""
+    nexus = (
+        "#NEXUS\nBegin trees;\n"
+        "tree TREE1 = [&R] ("
+        "BIA-642|PP_00763UP.1|DRC|Ituri|Nyakunde|2026-05-27:0.08,"
+        "14[&rate=0.001]:0.02);\nEnd;\n"
+    )
+    tree_path = tmp_path / "2026-06-30" / "Ituri.ebds.hipstr.tree"
+    tree_path.parent.mkdir(parents=True)
+    tree_path.write_text(nexus, encoding="utf-8")
+    assert phylo.tip_count_from_filename(tree_path.name) is None
+    out = phylo.prepare_phylo_tree_products(tree_path)
+    assert out["meta"]["tipCount"] == 2
+    assert out["tips"][0]["id"] == "PP_00763UP.1"
+
+
+def test_tip_count_from_filename_ignores_run_index():
+    assert phylo.tip_count_from_filename("full.n982.GTR_SG.hipstr.tree") == 982
+    assert phylo.tip_count_from_filename(
+        "Ituri2026.DRC_trimmed_n778.GTR_HMCSG.temp.hipstrCA.edit.tree"
+    ) == 778
+    assert phylo.tip_count_from_filename(
+        "Ituri_2026-06-30_DRC_n120.ebds.hipstr_0062.tree"
+    ) == 120
+    assert phylo.tip_count_from_filename("demo.hipstr.tree") is None
 
 
 def test_prepare_phylo_tree_products_maps_beast_height_95_hpd_for_peartree(tmp_path):

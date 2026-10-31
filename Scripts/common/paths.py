@@ -54,6 +54,15 @@ DASHBOARD_PLOTS_DIR = Path(
     os.environ.get("DASHBOARD_PLOTS_DIR") or
     (SCRIPT_DIR.parent.parent / "BDBV2026-Processed_Sensitive_Data" / "outputs")
 ).resolve()
+# Spatial invasion-risk model outputs, produced by INRB-UMIE/BDBV2026-Spatial_Invasion_Risk.
+# Points at the REPO ROOT: outputs/latest.json names the current run folder
+# (outputs/<date>/bayes_risk_scores_all_zones.csv + run_info.json +
+# harmonised_confirmed_cases.csv). Default assumes the repo is cloned as a
+# sibling of this one; override with the SPATIAL_INVASION_RISK_DIR env var.
+SPATIAL_INVASION_RISK_DIR = Path(
+    os.environ.get("SPATIAL_INVASION_RISK_DIR") or
+    (SCRIPT_DIR.parent.parent / "BDBV2026-Spatial_Invasion_Risk")
+).resolve()
 # Genomic-epi phylo products (tree/tips/meta/skygrid/exponential), produced by the
 # sibling repo INRB-UMIE/BDBV2026-Genomic_Epi. Default assumes it is cloned as a
 # sibling of this repo (same convention as BUILD_DIR/DASHBOARD_PLOTS_DIR above);

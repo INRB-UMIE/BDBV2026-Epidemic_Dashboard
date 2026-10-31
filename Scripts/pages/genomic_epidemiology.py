@@ -26,6 +26,7 @@ _HEAD = r"""<meta http-equiv="Content-Security-Policy" content="font-src 'self' 
 _BODY = r"""<div id="genomic-panel">
   <div id="genomic-resize" role="separator" aria-orientation="vertical" data-i18n-title="ui.aria.genomic_resize" data-i18n-aria="ui.aria.genomic_resize" title="Drag to resize" tabindex="0"></div>
   <div class="gen-intro">
+    <p id="gen-coverage" class="gen-coverage" hidden></p>
     <p data-i18n-html="ui.genomic.latest_report">The latest report detailing the genomic characterisation and epidemiology of the BDBV outbreak in the DRC can be found <a href="https://cdn.jsdelivr.net/gh/INRB-UMIE/BDBV2026-Reports@main/Genomic/2026-09-23_Report-Genomics_EN.pdf" target="_blank" rel="noopener">here</a>.</p>
     <p data-i18n-html="ui.genomic.intro">A more detailed report of the data, methodology, and result interpretation can be found at <a href="https://virological.org/t/genomic-epidemiology-of-the-ongoing-2026-bundibugyo-virus-disease-outbreak-in-the-democratic-republic-of-the-congo/1045" target="_blank" rel="noopener">virological.org/t/genomic-epidemiology-of-the-ongoing-2026-bundibugyo-virus-disease-outbreak-in-the-democratic-republic-of-the-congo/1045</a>.</p>
   </div>
