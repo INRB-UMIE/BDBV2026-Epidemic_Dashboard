@@ -34,13 +34,24 @@ structure" below), each of the four "real" pages has its own controls and
 responsive behaviour worth documenting here, since none of it is obvious
 from the code alone.
 
-**Current Snapshot** (`index.html`) — the main map, coloured by whichever
-layer is selected (confirmed/suspected cases, deaths, genomic sequencing,
-etc.), with a health-zone search, a layer-controls panel (top-left), and a
-zone-details panel (top-right). Both side panels are collapsible via the
-toggle in their header. On narrow screens (≤700px) the Leaflet zoom control
-is hidden (pinch-to-zoom is used instead) and both panels start collapsed to
-just their title bar, pinned to the top of the map pane.
+**Current Snapshot** (`index.html`) — two panes, like Trends and Spatial
+Risk: the map on the left (coloured by the selected layer, with the layer
+controls and legend floating over it and the health-zone search in its
+top-left corner) and a summary rail on the right, wider than the map by
+default (58%) and resizable via a drag handle (remembered per browser). With
+no zone selected the rail shows a national overview; clicking or searching a
+health zone switches it to that zone and fits the map to the zone plus the
+full extent of its Flowminder flow arrows. The rail summarises the other tabs:
+confirmed cases / deaths (and recoveries nationally), days since the last
+confirmed case, samples tested, genome sequences; daily cases by onset with the
+5-day test positivity overlay; the zone's national invasion-risk rank (or the
+top-5 zones nationally); contact tracing indicators (zone, else province);
+laboratories in the zone with samples and positivity; and a merged national /
+provincial / zone public-health-context news feed. It is drawn by
+`Scripts/assets/snapshot.js` from `PAYLOAD.snapshot_summary`
+(`Scripts/common/snapshot_summary.py`, a compact digest of the page-scoped
+Trends / Surveillance / Genomic slices) plus the shared payload. On narrow
+screens (≤700px) the map and rail stack vertically.
 
 **Epidemiological Trends** (`trends.html`) — a right-hand rail with
 National / Provincial / Health Zone / Health Area scope buttons and a location search
@@ -100,9 +111,9 @@ the build still succeeds and the contact tracing cards show "no data".
   of sitting in the footer.
 - The page tabs become a single horizontally-scrollable row instead of
   wrapping onto multiple lines.
-- Every collapsible panel (layer controls, legends, plot cards) plus the
-  Current Snapshot zone-details panel auto-collapses to just its title bar
-  on load.
+- Every collapsible panel (layer controls, legends, plot cards)
+  auto-collapses to just its title bar on load. The Current Snapshot summary
+  rail is not collapsible; it stacks below the map instead.
 
 ### Health Area scope (Trends)
 

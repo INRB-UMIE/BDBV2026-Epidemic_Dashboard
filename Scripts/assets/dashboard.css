@@ -13,6 +13,8 @@
     --partner-gap: 20px;
     --epi-panel-width: 50%;
     --trends-panel-width: 40%;
+    /* Current Snapshot summary rail; wider than the map by default. */
+    --snapshot-panel-width: 58%;
     /* Band-A (wide-branch) panel widths #zone-search's offset is derived from.
        Each is read by the panel's own width rule (unconditional, all bands)
        and by the band-A search offset (default block only), so the 10px gap
@@ -220,7 +222,12 @@
      additionally clamp their width to the visible map -- see the rail clamp
      note on each rule. */
   body.view-map #zone-search {
-    top:12px; left:calc(12px + var(--layer-panel-width) + 10px);
+    /* The Snapshot map shares the width with the summary rail (wider than the
+       map by default), so there is no room beside the LAYER panel: the search
+       takes the corner and #controls drops below it (see the Snapshot rail
+       block at the end of this file). Same rail clamp as Trends. */
+    top:12px; left:12px;
+    width:min(240px, calc(100% - var(--snapshot-panel-width) - 24px));
   }
   body.view-context #zone-search {
     top:12px; left:calc(12px + var(--context-panel-width) + 10px);
@@ -1688,4 +1695,224 @@
     #surv-inner { padding:10px 10px 24px; }
     .surv-chart, .surv-wide .surv-chart { height:220px; min-height:220px; }
     .surv-tile-v { font-size:17px; }
+  }
+
+  /* ── Current Snapshot: map left, summary rail right (snapshot.js) ───────
+     Same mechanics as the Trends rail (#trends-panel/#trends-split-handle),
+     with its own width variable so the two tabs remember independent splits.
+     The rail replaces the old floating zone-details box (#info), which stays
+     in the shared markup for the other pages' engine code but is hidden here.
+     LAYER (#controls) and the legend still float over the map pane. */
+  #snapshot-panel {
+    display:none;
+    position:absolute; z-index:1000;
+    top:0; right:0; bottom:var(--view-chrome-height);
+    width:var(--snapshot-panel-width);
+    background:#f6f5f2; color:#2a2a27;
+    border-left:1px solid #e7e3db;
+    box-shadow:-2px 0 12px rgba(42,42,39,0.06);
+    box-sizing:border-box;
+    overflow-y:auto; -webkit-overflow-scrolling:touch;
+    font-size:13px; line-height:1.4;
+  }
+  body.view-map #snapshot-panel { display:block; }
+  body.view-map #map { right:var(--snapshot-panel-width); }
+  body.view-map #info { display:none !important; }
+  body.view-map #controls {
+    top:calc(12px + var(--zone-search-drop));
+    width:min(var(--layer-panel-width), calc(100% - var(--snapshot-panel-width) - 24px));
+    max-width:min(var(--layer-panel-width), calc(100% - var(--snapshot-panel-width) - 24px));
+  }
+  body.view-map #legend {
+    max-width:min(360px, calc(100% - var(--snapshot-panel-width) - 24px));
+  }
+  /* Map hints centre on the map pane, not on the whole viewport. */
+  body.view-map #travel-hint,
+  body.view-map #flow-hint,
+  body.view-map #flow-empty-hint {
+    left:calc((100% - var(--snapshot-panel-width)) / 2);
+    max-width:min(420px, calc(100% - var(--snapshot-panel-width) - 48px));
+  }
+  #snapshot-split-handle {
+    display:none;
+    position:absolute;
+    top:0; right:var(--snapshot-panel-width); bottom:var(--view-chrome-height);
+    width:10px; margin-right:-5px; z-index:1200;
+    cursor:col-resize; touch-action:none; background:transparent;
+  }
+  #snapshot-split-handle::before {
+    content:""; position:absolute; top:0; bottom:0; left:50%; width:2px;
+    transform:translateX(-50%); background:#d8d3c9;
+    transition:background .12s ease, width .12s ease;
+  }
+  #snapshot-split-handle:hover::before,
+  #snapshot-split-handle:focus-visible::before,
+  body.snapshot-splitting #snapshot-split-handle::before { width:3px; background:#9b7d4e; }
+  #snapshot-split-handle:focus-visible { outline:none; }
+  body.view-map #snapshot-split-handle { display:block; }
+  body.snapshot-splitting { cursor:col-resize; user-select:none; }
+  body.snapshot-splitting #map,
+  body.snapshot-splitting #snapshot-panel { pointer-events:none; }
+
+  #snap-head {
+    position:sticky; top:0; z-index:2;
+    display:flex; align-items:flex-start; justify-content:space-between; gap:12px;
+    padding:12px 16px 10px;
+    background:#f6f5f2; border-bottom:1px solid #e7e3db;
+  }
+  #snap-head-text { min-width:0; }
+  #snap-title { margin:0; font-size:18px; font-weight:700; color:#2a2a27; line-height:1.2; }
+  #snap-sub { margin:2px 0 0; font-size:11.5px; color:#9c968b; }
+  #snap-clear[hidden] { display:none; }
+  #snapshot-panel button.snap-link,
+  #snap-clear {
+    background:transparent !important; border:1px solid #e7e3db !important;
+    color:#7c4a12 !important; border-radius:4px; padding:4px 9px;
+    font-size:11.5px; cursor:pointer; white-space:nowrap; flex:none;
+  }
+  #snapshot-panel button.snap-link:hover,
+  #snap-clear:hover { border-color:#9b7d4e !important; color:#7c1d1d !important; background:rgba(155,125,78,0.08) !important; }
+  #snapshot-panel button.snap-inline {
+    background:transparent !important; border:none !important; padding:0;
+    color:#7c4a12 !important; font:inherit; cursor:pointer; text-align:left;
+    text-decoration:underline; text-decoration-color:#e7e3db; text-underline-offset:2px;
+  }
+  #snapshot-panel button.snap-inline:hover { color:#7c1d1d !important; text-decoration-color:currentColor; }
+
+  #snap-body {
+    display:grid; grid-template-columns:repeat(auto-fill, minmax(280px, 1fr));
+    gap:10px; padding:12px 16px 24px;
+  }
+  .snap-card {
+    background:#fff; border:1px solid #e7e3db; border-radius:4px;
+    padding:10px 12px; min-width:0; box-sizing:border-box;
+  }
+  .snap-wide { grid-column:1 / -1; }
+  .snap-card h3 {
+    margin:0 0 8px; font-size:10.5px; font-weight:600; letter-spacing:0.09em;
+    text-transform:uppercase; color:#5c574f;
+    display:flex; align-items:baseline; justify-content:space-between; gap:8px;
+  }
+  .snap-card h3 .snap-asof { text-transform:none; letter-spacing:0; font-weight:400; color:#9c968b; font-size:10.5px; }
+  .snap-kpis {
+    grid-column:1 / -1;
+    display:grid; grid-template-columns:repeat(auto-fit, minmax(130px, 1fr)); gap:8px;
+  }
+  .snap-tile {
+    background:#fff; border:1px solid #e7e3db; border-left:3px solid #9e2b2b; border-radius:4px;
+    padding:8px 10px; display:flex; flex-direction:column; gap:1px; min-width:0;
+  }
+  .snap-tile.t-deaths { border-left-color:#2a2a27; }
+  .snap-tile.t-recovered { border-left-color:#285943; }
+  .snap-tile.t-tests { border-left-color:#587e72; }
+  .snap-tile.t-recency { border-left-color:#ef8a62; }
+  .snap-tile.t-seq { border-left-color:#1B4671; }
+  .snap-tile-v { font-size:22px; font-weight:700; line-height:1.15; color:#2a2a27; font-variant-numeric:tabular-nums; }
+  .snap-tile-l { font-size:11px; color:#5c574f; }
+  .snap-tile-s { font-size:10.5px; color:#9c968b; }
+  .snap-chart { position:relative; height:210px; }
+  .snap-chart svg { display:block; width:100%; height:100%; }
+  .snap-legend { display:flex; flex-wrap:wrap; gap:4px 12px; font-size:10.5px; color:#5c574f; margin:0 0 4px; }
+  .snap-legend i { display:inline-block; width:9px; height:9px; border-radius:1px; margin-right:4px; vertical-align:-1px; }
+  .snap-legend i.ln { height:2px; width:12px; vertical-align:2px; }
+  .snap-note { margin:6px 0 0; font-size:10.5px; line-height:1.4; color:#9c968b; }
+  .snap-empty { margin:0; font-size:12px; color:#9c968b; font-style:italic; }
+  .snap-big { font-size:30px; font-weight:700; line-height:1.05; color:#2a2a27; font-variant-numeric:tabular-nums; }
+  .snap-big small { font-size:13px; font-weight:400; color:#9c968b; }
+  .snap-rows { display:grid; grid-template-columns:auto 1fr; gap:3px 12px; margin:8px 0 0; font-size:12px; }
+  .snap-rows dt { color:#9c968b; }
+  .snap-rows dd { margin:0; text-align:right; font-variant-numeric:tabular-nums; color:#2a2a27; }
+  .snap-bar { height:6px; background:#f0ede7; border-radius:3px; overflow:hidden; margin:6px 0 2px; }
+  .snap-bar > span { display:block; height:100%; background:#587e72; }
+  .snap-table { width:100%; border-collapse:collapse; font-size:11.5px; }
+  .snap-table th, .snap-table td { padding:4px 6px; border-bottom:1px solid #f0ede7; text-align:left; color:#2a2a27; }
+  .snap-table td:first-child { color:#2a2a27; }
+  .snap-table th { font-weight:600; color:#5c574f; font-size:10.5px; white-space:nowrap; }
+  .snap-table .num { text-align:right; font-variant-numeric:tabular-nums; white-space:nowrap; }
+  .snap-table .sub { display:block; font-size:10px; color:#9c968b; }
+  .snap-table-wrap { max-height:260px; overflow-y:auto; }
+  /* Width only: the colour comes from the .pillar-* category rules, as on the
+     Public Health Context tab. */
+  .snap-news .context-pillar { margin:0 0 10px; padding-left:10px; border-left-width:3px; border-left-style:solid; }
+  .snap-news .context-pillar:last-child { margin-bottom:0; }
+  .snap-news .context-pillar h4 { margin:0 0 2px; font-size:12px; }
+  .snap-news .context-pillar p { color:#2a2a27; font-size:12px; line-height:1.45; }
+  .snap-news .context-meta { font-size:10px; color:#9c968b; margin-bottom:3px; }
+  .snap-news .context-meta .scope-tag {
+    display:inline-block; margin-right:6px; padding:1px 5px; border-radius:3px;
+    background:#f3f1ec; color:#9b7d4e; border:1px solid #e7e3db;
+    text-transform:uppercase; letter-spacing:0.4px; font-size:9px;
+  }
+  .snap-news .snap-link { margin-top:8px; }
+  .snap-filter { display:flex; flex-wrap:wrap; gap:4px; }
+  #snapshot-panel button.snap-chip {
+    background:#fff !important; border:1px solid #e7e3db !important; color:#5c574f !important;
+    border-radius:10px; padding:1px 8px; font-size:10.5px; cursor:pointer; text-transform:none; letter-spacing:0;
+  }
+  #snapshot-panel button.snap-chip.active {
+    background:rgba(155,125,78,0.16) !important; border-color:#9b7d4e !important; color:#7c4a12 !important;
+  }
+
+  @media (max-width: 700px) {
+    /* Stack like Trends / Spatial Risk: map on top, summary below. */
+    body.view-map #map { right:0; bottom:auto; height:40vh; }
+    body.view-map #snapshot-panel {
+      top:40vh; left:0; right:0; width:auto;
+      border-left:none; border-top:1px solid #e7e3db;
+      box-shadow:0 -2px 12px rgba(42,42,39,0.06);
+    }
+    #snapshot-split-handle { display:none !important; }
+    body.view-map #controls { width:var(--layer-panel-width); max-width:var(--layer-panel-width); }
+    body.view-map #controls.collapsed { width:auto; max-width:min(160px, calc(60vw - 18px)); }
+    body.view-map #legend { max-width:60vw; bottom:auto; top:calc(40vh - 12px); transform:translateY(-100%); }
+    body.view-map #travel-hint,
+    body.view-map #flow-hint,
+    body.view-map #flow-empty-hint { left:50%; max-width:calc(100vw - 48px); }
+    body.view-map #flow-hint, body.view-map #flow-empty-hint { bottom:auto; top:calc(40vh - 64px); }
+    #snap-head { padding:10px 12px 8px; }
+    #snap-title { font-size:16px; }
+    #snap-body { grid-template-columns:minmax(0, 1fr); padding:10px 12px 20px; }
+    .snap-tile-v { font-size:18px; }
+  }
+  #snapshot-panel a.snap-link-a { color:#7c4a12; font-size:11.5px; text-decoration:none; }
+  #snapshot-panel a.snap-link-a:hover { color:#7c1d1d; text-decoration:underline; }
+  /* Recent trend strip (top of the Snapshot rail) and mobility card. */
+  .snap-trend { display:flex; flex-wrap:wrap; gap:10px 28px; }
+  .snap-trend-item { min-width:200px; flex:1 1 0; }
+  .snap-trend-v { font-size:22px; font-weight:700; line-height:1.2; color:#2a2a27; font-variant-numeric:tabular-nums; }
+  .snap-trend-v .snap-tile-s { font-size:11px; font-weight:400; }
+  .snap-trend-bad, .snap-trend-good, .snap-trend-flat { font-size:14px; }
+  .snap-trend-bad { color:#b23b2e; }
+  .snap-trend-good { color:#285943; }
+  .snap-trend-flat { color:#9c968b; }
+  #snap-trend { border-left:3px solid #9b7d4e; }
+  .snap-case-tag { color:#9e2b2b; }
+  /* ── Snapshot: compact combined LAYER + legend widget (snapshot.js moves the
+     legend body into #controls and sets body.snapshot-combined-legend). ── */
+  body.snapshot-combined-legend #legend { display:none !important; }
+  body.view-map.snapshot-combined-legend #controls {
+    width:min(250px, calc(100% - var(--snapshot-panel-width) - 24px));
+    max-width:min(250px, calc(100% - var(--snapshot-panel-width) - 24px));
+    padding:7px 10px 8px; font-size:11.5px; line-height:1.35;
+  }
+  body.snapshot-combined-legend #controls .panel-header strong { font-size:10px; }
+  body.snapshot-combined-legend #controls .panel-toggle { width:18px; height:18px; font-size:12px; }
+  /* Visually hidden, still the select's accessible name. */
+  body.snapshot-combined-legend #controls label[for="layer-select"] {
+    position:absolute; width:1px; height:1px; overflow:hidden; clip-path:inset(50%); white-space:nowrap;
+  }
+  body.snapshot-combined-legend #controls select { margin-top:6px; padding:3px 4px; font-size:11.5px; }
+  #controls-legend { margin-top:7px; }
+  #controls-legend .legend-bar { width:100%; height:9px; border-radius:2px; }
+  #controls-legend .legend-ticks { width:100%; font-size:9.5px; margin-top:1px; }
+  #controls-legend .legend-scale { font-size:9.5px; margin-top:1px; }
+  #controls-legend #legend-gray { font-size:10px !important; margin-top:3px !important; line-height:1.4; }
+  #controls-legend .legend-flow-row { margin-top:2px; }
+  body.snapshot-combined-legend #controls .checkbox-row { margin-top:4px; gap:5px; font-size:11px; }
+  body.snapshot-combined-legend #controls .checkbox-row input { margin:0; }
+  body.snapshot-combined-legend #controls .footer { margin-top:5px; font-size:9.5px; line-height:1.35; }
+  @media (max-width: 700px) {
+    /* Map is full width above the rail here. */
+    body.view-map.snapshot-combined-legend #controls { width:min(250px, calc(100vw - 24px)); max-width:min(250px, calc(100vw - 24px)); }
+    body.view-map.snapshot-combined-legend #controls.collapsed { width:auto; max-width:min(160px, calc(60vw - 18px)); }
   }

@@ -245,7 +245,11 @@ function refreshZoneSelection() {
 // The snapshot view's single focused zone. Drives the info box, the persistent
 // highlight, and — where the active layer cares — the flow-arc origin and the
 // matrix travel origin. Passing the already-focused nom (or null) clears focus.
-function setMapSelection(nom) {
+//
+// opts.fit (default true): frame the newly focused zone together with every
+// flow arc drawn from/to it (see fitMapToSnapshotSelection). Clearing focus
+// never moves the map.
+function setMapSelection(nom, opts) {
   const next = (nom && nom === mapSelectedNom) ? null : (nom || null);
   mapSelectedNom = next;
   flowHubNom = next;
@@ -257,9 +261,39 @@ function setMapSelection(nom) {
   syncMatrixUi();
   renderMapInfoBox();
   refreshZoneSelection();
+  if (next && activeView === "map" && !(opts && opts.fit === false)) {
+    fitMapToSnapshotSelection(next);
+  }
+}
+
+// Snapshot: frame the focused zone plus the full extent of its Flowminder
+// in/out arcs, so the widest-reaching flow is on screen. Without arcs (overlay
+// off, or no flow data for the zone) it falls back to the shared zone zoom.
+function fitMapToSnapshotSelection(nom) {
+  let bounds = null;
+  const zoneLayer = findGeoLayerByNom(nom);
+  if (zoneLayer) bounds = L.latLngBounds(zoneLayer.getBounds().getSouthWest(), zoneLayer.getBounds().getNorthEast());
+  let arcs = 0;
+  if (map.hasLayer(flowArcLayer)) {
+    flowArcLayer.eachLayer(function(l) {
+      if (typeof l.getBounds === "function") {
+        const b = l.getBounds();
+        if (b && b.isValid()) { bounds = bounds ? bounds.extend(b) : L.latLngBounds(b.getSouthWest(), b.getNorthEast()); arcs++; }
+      }
+    });
+  }
+  if (!arcs) {
+    zoneSearchZoomTo({kind: "health_zone", id: nom});
+    return;
+  }
+  if (!bounds || !bounds.isValid()) return;
+  const pad = zoneSearchPad();
+  map.fitBounds(bounds, {padding: pad, maxZoom: ZONE_SEARCH_MAX_ZOOM});
 }
 
 function renderMapInfoBox() {
+  // Current Snapshot summary rail (snapshot.js) replaces the floating box.
+  if (window.SnapshotSummary) window.SnapshotSummary.render(mapSelectedNom);
   const el = document.getElementById("info-body");
   if (!el) return;
   const feat = featureByNom(mapSelectedNom);
@@ -2432,10 +2466,15 @@ const ZONE_SEARCH_VIEWS = {
     kinds: ["health_zone"],
     placeholder: "ui.zone_search_placeholder",
     aria: "ui.zone_search",
-    // Collapsible detail panel to open after a narrow-screen selection; absent
-    // on views that have none. See pick() in wireZoneSearch().
-    panel: "info",
-    select: function(entry) { setMapSelection(entry.id); },
+    // No collapsible detail panel: the summary rail (snapshot.js) is always
+    // open. setMapSelection() frames the zone AND its flow arcs itself, so the
+    // generic zone zoom in pick() is skipped (ownsZoom).
+    ownsZoom: true,
+    select: function(entry) {
+      // A repeat search for the focused zone must not toggle it off.
+      if (entry.id === mapSelectedNom) fitMapToSnapshotSelection(entry.id);
+      else setMapSelection(entry.id);
+    },
   },
   "context": {
     kinds: ["health_zone"],
@@ -2676,7 +2715,7 @@ function findGeoLayerByNom(nom) {
     const entry = matches[idx];
     if (!entry) return;
     view.select(entry);
-    zoneSearchZoomTo(entry);
+    if (!view.ownsZoom) zoneSearchZoomTo(entry);
     // The box is a query field, not a state indicator: the selection is
     // visible in the map highlight / info panel / table row / plot titles.
     input.value = "";

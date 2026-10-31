@@ -16,6 +16,7 @@ from datetime import datetime, timezone
 
 from common.data_sources import *  # noqa: F401,F403 -- re-export all loaders/constants
 from common.surveillance import load_surveillance
+from common.snapshot_summary import build_snapshot_summary
 from common.paths import (
     BUILD_GEOJSON, OSRM_TRAVEL_TIME_CSV, DATA_ROOT, BUILD_DIR,
 )
@@ -190,7 +191,7 @@ def build_shared_payload() -> dict:
     # `data_build` (the companion BDBV2026-Data repo's release tag).
     dashboard_built_at = datetime.now(timezone.utc).isoformat()
 
-    return {
+    payload = {
         "asof": asof,
         "dashboard_built_at": dashboard_built_at,
         "travel_from": TRAVEL_FROM_ZONE,
@@ -237,5 +238,9 @@ def build_shared_payload() -> dict:
         "confirmed_recency": confirmed_recency,
         "genomic": genomic,
     }
+    # Compact digest of the page-scoped slices above (trends, surveillance,
+    # genomic) for the Current Snapshot summary rail; see snapshot_summary.py.
+    payload["snapshot_summary"] = build_snapshot_summary(payload)
+    return payload
 
 

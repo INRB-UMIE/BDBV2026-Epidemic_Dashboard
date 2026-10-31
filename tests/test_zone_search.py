@@ -218,7 +218,10 @@ def test_band_a_offsets_sit_beside_the_two_corner_panels():
     since band B/C rules must not contain these tokens, but the fix is to
     anchor the search rather than to relax the assertion."""
     css = _css()
-    for view, token in (("map", "--layer-panel-width"), ("context", "--context-panel-width")):
+    # Snapshot (view-map) now has a summary rail, so its search takes the map
+    # corner and clamps to the visible map like Trends -- it reads the rail
+    # width, not the LAYER panel's.
+    for view, token in (("map", "--snapshot-panel-width"), ("context", "--context-panel-width")):
         m = re.search(rf"body\.view-{view} #zone-search \{{([^}}]*)\}}", css)
         assert m, f"no band-A #zone-search rule for view-{view}"
         assert token in m.group(1), f"band-A view-{view} offset does not read {token}"
@@ -268,6 +271,13 @@ def test_nothing_is_displaced_in_band_a():
     outside = css
     for _query, body in _media_blocks(css):
         outside = outside.replace(body, "")
+    # The one deliberate exception: on Snapshot the map shares its width with
+    # the summary rail, so the search takes the corner at every width and the
+    # LAYER panel drops below it (body.view-map #controls).
+    outside = "".join(
+        f"{sel}{{{body}}}" for sel, body in _rules(outside)
+        if sel.strip() != "body.view-map #controls"
+    )
     assert DROP_OFFSET not in outside, (
         "a displacement offset leaked into band A (the unqualified default)"
     )

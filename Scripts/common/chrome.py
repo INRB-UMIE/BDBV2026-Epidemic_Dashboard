@@ -69,6 +69,15 @@ __EXTRA_HEAD__
         document.documentElement.style.setProperty("--trends-panel-width", n + "%");
       }
     }
+    // Same for the Current Snapshot map/summary split (snapshot.js).
+    var s = localStorage.getItem("bdbv_snapshot_panel_width_pct");
+    if (s !== null && s !== "") {
+      var m = parseFloat(s);
+      if (isFinite(m)) {
+        m = Math.max(30, Math.min(75, m));
+        document.documentElement.style.setProperty("--snapshot-panel-width", m + "%");
+      }
+    }
   } catch (e) {}
 })();
 </script>
@@ -470,6 +479,8 @@ _PAGE_SCOPED_PAYLOAD_KEYS = {
     "trends": {"trends"},
     # Contact tracing + testing series; only the Surveillance and Testing tab.
     "surveillance": {"surveillance-testing"},
+    # Digest of trends/surveillance/genomic for the Snapshot summary rail.
+    "snapshot_summary": {"map"},
 }
 
 

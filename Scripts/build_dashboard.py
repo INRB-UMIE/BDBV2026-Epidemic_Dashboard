@@ -136,7 +136,7 @@ def _write_shared_assets(assets_dir) -> tuple[int, int]:
     # charts.js is written unconditionally alongside engine.js; trends.js is
     # referenced only by trends.html, surveillance.js only by
     # surveillance-testing.html.
-    for name in ("charts.js", "trends.js", "surveillance.js"):
+    for name in ("charts.js", "trends.js", "surveillance.js", "snapshot.js"):
         (assets_dir / name).write_text(
             (SCRIPT_DIR / "assets" / name).read_text(encoding="utf-8"), encoding="utf-8")
 
