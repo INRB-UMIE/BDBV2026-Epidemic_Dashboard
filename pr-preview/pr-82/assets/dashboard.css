@@ -1916,6 +1916,25 @@
     body.view-map.snapshot-combined-legend #controls { width:min(250px, calc(100vw - 24px)); max-width:min(250px, calc(100vw - 24px)); }
     body.view-map.snapshot-combined-legend #controls.collapsed { width:auto; max-width:min(160px, calc(60vw - 18px)); }
   }
+  /* Snapshot Rt card: national figure + sparkline beside the ranked provinces. */
+  .snap-rt { display:grid; grid-template-columns:repeat(auto-fit, minmax(250px, 1fr)); gap:10px 22px; }
+  .snap-rt-spark { height:96px; margin-top:6px; }
+  .snap-rt-chip { display:inline-block; padding:1px 7px; border-radius:9px; font-size:10px; font-weight:600; white-space:nowrap; }
+  .snap-rt-chip.rt-up { background:#f6dcd8; color:#9e2b2b; }
+  .snap-rt-chip.rt-down { background:#dbe9e1; color:#285943; }
+  .snap-rt-chip.rt-unc { background:#f0ede7; color:#5c574f; }
+  .snap-table tr.snap-rt-here td { background:#faf3e6; }
+  .snap-table tr.snap-rt-here td:first-child { box-shadow:inset 3px 0 0 #9b7d4e; }
+  #snap-rt { border-left:3px solid #6a4c93; }
+  @media (max-width: 700px) { .snap-rt { grid-template-columns:minmax(0, 1fr); } }
+  /* Risk / contact tracing / mobility: three across or one column, never
+     2 + 1. "Switcher" flex pattern (no container queries -- see
+     tests/test_zone_search.py): each item's flex-basis is hugely negative
+     (clamped to 0, so all three share the row) when the row is at least
+     860px wide (3 x 280px + 2 gaps), and hugely positive (one per line)
+     below that. */
+  .snap-trio { grid-column:1 / -1; display:flex; flex-wrap:wrap; gap:10px; }
+  .snap-trio > .snap-card { flex:1 1 calc((860px - 100%) * 999); min-width:0; }
 
 
 /* --- theme overrides --- */
