@@ -17,6 +17,7 @@ from datetime import datetime, timezone
 from common.data_sources import *  # noqa: F401,F403 -- re-export all loaders/constants
 from common.surveillance import load_surveillance
 from common.snapshot_summary import build_snapshot_summary
+from common.rt import load_rt_estimates
 from common.paths import (
     BUILD_GEOJSON, OSRM_TRAVEL_TIME_CSV, DATA_ROOT, BUILD_DIR,
 )
@@ -117,6 +118,7 @@ def build_shared_payload() -> dict:
               f"{len(trends['cases']['health_areas'])} health areas, "
               f"{len(trends['labs'])} labs, "
               f"incomplete from {trends['incomplete_from']}")
+    rt = load_rt_estimates()
     surveillance = load_surveillance()
     if surveillance:
         ct = surveillance.get("contact_tracing") or {}
@@ -230,6 +232,7 @@ def build_shared_payload() -> dict:
         "province_boundaries": province_boundaries,
         "trends": trends,
         "surveillance": surveillance,
+        "rt": rt,
         "invasion_risk": invasion_risk,
         "import_force_pairwise": import_force_pairwise,
         "phr_context": phr_context_by_lang.get("en", {"national": [], "by_nom": {}}),

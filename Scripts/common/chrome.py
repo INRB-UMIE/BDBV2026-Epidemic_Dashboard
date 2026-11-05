@@ -389,6 +389,15 @@ __NAV_LINKS__
       </div>
       <div id="trends-positivity-body" class="panel-body trends-empty"></div>
     </div>
+    <div id="trends-rt" class="panel trends-plot-card">
+      <div class="panel-header">
+        <strong id="trends-rt-title" data-i18n="ui.trends_rt_panel">Reproduction Number (Rt)</strong>
+        <button class="panel-toggle" data-target="trends-rt" type="button"
+                data-i18n-aria="ui.aria.toggle_trends" data-i18n-title="ui.aria.collapse_trends"
+                aria-label="Toggle reproduction number panel" title="Collapse / expand reproduction number">−</button>
+      </div>
+      <div id="trends-rt-body" class="panel-body trends-empty"></div>
+    </div>
     <div id="trends-labs" class="panel trends-plot-card" style="display:none">
       <div class="panel-header">
         <strong id="trends-labs-title" data-i18n="ui.trends_labs_panel">Laboratory testing</strong>
@@ -481,6 +490,8 @@ _PAGE_SCOPED_PAYLOAD_KEYS = {
     "surveillance": {"surveillance-testing"},
     # Digest of trends/surveillance/genomic for the Snapshot summary rail.
     "snapshot_summary": {"map"},
+    # Rt time series (common/rt.py): Trends card + Snapshot summary card.
+    "rt": {"trends", "map"},
 }
 
 

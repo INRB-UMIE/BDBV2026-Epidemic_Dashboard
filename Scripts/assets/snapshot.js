@@ -13,6 +13,7 @@
 //                              zone_data.genomic_sequence_count
 //   * recent trend          -- last 14 complete days vs the 14 before, from
 //                              the same curve as the chart
+//   * reproduction number   -- PAYLOAD.rt (common/rt.py): national + provinces
 //   * incoming mobility     -- PAYLOAD.flow_catalogs.flowminder_latest (the
 //                              map's flow arrows)
 //   * news feed             -- phrContext() (Public Health Context tab)
@@ -539,6 +540,115 @@
     return card("snap-mob", tr("mob_title"), body, { asof: asof });
   }
 
+  // ── Reproduction number (Rt) ───────────────────────────────────────────
+  // PAYLOAD.rt (common/rt.py): national + province series. Left: current
+  // national Rt with a sparkline; right: provinces ranked by their latest
+  // estimate. A zone view highlights its province's row (there are no
+  // zone-level estimates).
+  var COLOR_RT = "#6a4c93", COLOR_RT_BAND = "rgba(106,76,147,0.16)";
+  var RT_SPARK_DAYS = 90;
+
+  function rtLatest(e) {
+    if (!e || !e.dates || !e.dates.length) return null;
+    for (var i = e.dates.length - 1; i >= 0; i--) {
+      if (e.mean[i] != null) return { i: i, date: e.dates[i], mean: e.mean[i], lo: e.lo[i], hi: e.hi[i] };
+    }
+    return null;
+  }
+  // Status from the 95% interval, not the mean alone.
+  function rtStatus(l) {
+    if (!l || l.lo == null || l.hi == null) return { cls: "rt-unc", key: "rt_uncertain" };
+    if (l.lo > 1) return { cls: "rt-up", key: "rt_growing" };
+    if (l.hi < 1) return { cls: "rt-down", key: "rt_declining" };
+    return { cls: "rt-unc", key: "rt_uncertain" };
+  }
+  function f2(v) { return v == null ? "–" : Number(v).toLocaleString(loc(), { minimumFractionDigits: 2, maximumFractionDigits: 2 }); }
+
+  function rtCard(nom) {
+    var rt = PAYLOAD.rt;
+    if (!rt || !rt.national) {
+      return card("snap-rt", tr("rt_title"), '<p class="snap-empty">' + esc(tr("no_data")) + "</p>", { wide: true });
+    }
+    var nat = rtLatest(rt.national);
+    var st = rtStatus(nat);
+    var then = null;
+    if (nat) {
+      var target = addDays(nat.date, -14);
+      var j = rt.national.dates.indexOf(target);
+      if (j >= 0) then = rt.national.mean[j];
+    }
+    var left = '<div class="snap-rt-nat">' +
+      '<div class="snap-tile-l">' + esc(tr("rt_national")) + "</div>" +
+      '<div class="snap-big">' + f2(nat && nat.mean) +
+        ' <small>(' + f2(nat && nat.lo) + "–" + f2(nat && nat.hi) + ")</small></div>" +
+      '<div><span class="snap-rt-chip ' + st.cls + '">' + esc(tr(st.key)) + "</span>" +
+        (then != null ? ' <span class="snap-tile-s">' + esc(trf("rt_then", { v: f2(then) })) + "</span>" : "") + "</div>" +
+      '<div class="snap-chart snap-rt-spark" id="snap-rt-spark"></div>' +
+      "</div>";
+
+    var province = nom && global.zoneProvince ? zoneProvince(nom) : null;
+    var rows = Object.keys(rt.provinces || {}).map(function (p) {
+      return { p: p, l: rtLatest(rt.provinces[p]) };
+    }).filter(function (r) { return r.l; }).sort(function (a, b) { return b.l.mean - a.l.mean; });
+    var right = '<div class="snap-rt-prov"><div class="snap-tile-l" style="margin-bottom:2px">' + esc(tr("rt_provinces")) + "</div>";
+    if (!rows.length) {
+      right += '<p class="snap-empty">' + esc(tr("no_data")) + "</p>";
+    } else {
+      right += '<table class="snap-table"><thead><tr><th>' + esc(tr("rt_col_province")) + '</th><th class="num">Rt</th><th class="num">' +
+        esc(tr("rt_col_ci")) + "</th><th></th></tr></thead><tbody>" + rows.map(function (r, i) {
+          var s2 = rtStatus(r.l);
+          var stale = nat && r.l.date !== nat.date ? '<span class="sub">' + esc(trf("rt_asof_short", { date: fmtShort(C.dayMs(r.l.date)) })) + "</span>" : "";
+          return '<tr' + (province === r.p ? ' class="snap-rt-here"' : "") + "><td>" + (i + 1) + ". " + esc(r.p) + stale + "</td>" +
+            '<td class="num"><strong>' + f2(r.l.mean) + "</strong></td>" +
+            '<td class="num">' + f2(r.l.lo) + "–" + f2(r.l.hi) + "</td>" +
+            '<td><span class="snap-rt-chip ' + s2.cls + '">' + esc(tr(s2.key)) + "</span></td></tr>";
+        }).join("") + "</tbody></table>";
+    }
+    if (nom) {
+      var has = province && (rt.provinces || {})[province];
+      right += '<p class="snap-note">' + esc(has ? trf("rt_zone_note", { province: province })
+        : trf("rt_zone_none", { province: province || "—" })) + "</p>";
+    }
+    right += "</div>";
+    var body = '<div class="snap-rt">' + left + right + "</div>" +
+      '<p class="snap-note">' + esc(tr("rt_note")) + ' <a class="snap-link-a" href="trends.html">' + esc(tr("rt_open")) + " →</a></p>";
+    var asof = nat ? trf("rt_asof", { date: fmtDate(nat.date), run: fmtDate(rt.run_date) }) : "";
+    return card("snap-rt", tr("rt_title"), body, { wide: true, asof: asof });
+  }
+
+  function drawRtSpark() {
+    var host = document.getElementById("snap-rt-spark");
+    var e = PAYLOAD.rt && PAYLOAD.rt.national;
+    if (!host || !e || !e.dates.length) return;
+    host.innerHTML = "";
+    var last = e.dates[e.dates.length - 1];
+    var from = addDays(last, -RT_SPARK_DAYS);
+    var idx = [];
+    e.dates.forEach(function (d, i) { if (d >= from) idx.push(i); });
+    var dates = idx.map(function (i) { return e.dates[i]; });
+    var pick = function (arr) { return idx.map(function (i) { return arr[i]; }); };
+    var lo = pick(e.lo), hi = pick(e.hi), mean = pick(e.mean);
+    var W = Math.max(200, host.clientWidth || 300), H = host.clientHeight || 96;
+    var svg = C.svgEl("svg", { viewBox: "0 0 " + W + " " + H, preserveAspectRatio: "none", role: "img", "aria-label": tr("rt_title") });
+    host.appendChild(svg);
+    var yMax = Math.max(2, Math.max.apply(null, hi.filter(function (v) { return v != null; }).concat([0])));
+    var fr = C.frame(svg, {
+      width: W, height: H, pad: { left: 26, right: 8, top: 6, bottom: 18 },
+      xStart: dates[0], xEnd: last, yMax: yMax, allowFractional: true,
+      fmtY: function (v) { return String(Math.round(v * 10) / 10); }
+    });
+    var y1 = fr.yToPx(1);
+    svg.appendChild(C.svgEl("line", { x1: fr.left, x2: fr.right, y1: y1, y2: y1, stroke: "#2a2a27", "stroke-width": 1, "stroke-dasharray": "4,3", opacity: 0.5 }));
+    C.ciBand(svg, fr, dates, lo, hi, COLOR_RT_BAND);
+    C.line(svg, fr, dates, mean, COLOR_RT, 1.5);
+    C.tooltip(host, svg, fr, function (day) {
+      var i = dates.indexOf(day);
+      if (i < 0 || mean[i] == null) return null;
+      return '<div class="dc-tip-d">' + esc(fmtDate(day)) + "</div><div>Rt " + f2(mean[i]) +
+        ' <span class="dc-tip-ci">(' + f2(lo[i]) + "–" + f2(hi[i]) + ")</span></div>";
+    });
+  }
+
   // ── Header ─────────────────────────────────────────────────────────────
   function header(nom) {
     var title = document.getElementById("snap-title");
@@ -569,9 +679,13 @@
     var changed = nom !== current;
     current = nom || null;
     header(current);
-    body.innerHTML = trendCard(current) + kpis(current) + chartCard(current) + riskCard(current) +
-      ctCard(current) + mobilityCard(current) + labsCard(current) + newsCard(current);
+    // Risk / contact tracing / mobility share one row container so they go
+    // straight from a column to three across, never 2 + 1 (CSS .snap-trio).
+    body.innerHTML = trendCard(current) + kpis(current) + chartCard(current) + rtCard(current) +
+      '<div class="snap-trio">' + riskCard(current) + ctCard(current) + mobilityCard(current) + "</div>" +
+      labsCard(current) + newsCard(current);
     drawChart(current);
+    drawRtSpark();
     if (changed) {
       var panel = document.getElementById("snapshot-panel");
       if (panel) panel.scrollTop = 0;
@@ -608,7 +722,7 @@
     function clamp(p) { return Math.max(MIN, Math.min(MAX, p)); }
     function scheduleRedraw() {
       clearTimeout(redrawTimer);
-      redrawTimer = setTimeout(function () { drawChart(current); }, 120);
+      redrawTimer = setTimeout(function () { drawChart(current); drawRtSpark(); }, 120);
     }
     function apply(p, invalidate) {
       var v = clamp(p);
@@ -652,6 +766,7 @@
       global.removeEventListener("touchcancel", up);
       invalidateMap();
       drawChart(current);
+      drawRtSpark();
     }
     function down(e) {
       dragging = true;
