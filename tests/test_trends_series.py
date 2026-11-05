@@ -752,6 +752,70 @@ def test_load_trends_series_incomplete_from_uses_snapshot_date_not_wall_clock(tm
     assert res["incomplete_from"] == "2030-01-07"
 
 
+# --- per-location cases band (reporting_backfill/incomplete_windows.json) -----
+
+def _seed_windows(snap, payload):
+    d = snap / "reporting_backfill"
+    d.mkdir(parents=True, exist_ok=True)
+    (d / "incomplete_windows.json").write_text(
+        payload if isinstance(payload, str) else json.dumps(payload), encoding="utf-8")
+
+
+WINDOWS_JSON = {
+    "reference_date": "2026-05-10",
+    "threshold": 0.9,
+    "national": {"days": 23, "source": "own", "reference_cases": 8000},
+    "provinces": {"Ituri": {"days": 17, "source": "own", "reference_cases": 5000}},
+    "health_zones": {
+        "  BUNIA ": {"days": 17, "source": "province:Ituri", "reference_cases": 12},
+        "Bad": {"days": "x", "source": "own"},          # unusable -> dropped
+        "Zero": {"days": 0, "source": "own"},            # non-positive -> dropped
+    },
+}
+
+
+def test_cases_incomplete_windows_are_frozen_per_location_at_build_time(tmp_path, monkeypatch):
+    out = _seed_snapshot(tmp_path)
+    _seed_windows(out / "2026-05-10", WINDOWS_JSON)
+    monkeypatch.setattr(ds, "DASHBOARD_PLOTS_DIR", out)
+
+    res = ds.load_trends_series(known_noms={"Bunia"})
+    ci = res["cases_incomplete"]
+
+    assert ci["threshold"] == 0.9
+    assert ci["national"] == {"days": 23, "from": "2026-04-17", "source": "own"}
+    assert ci["provinces"]["Ituri"]["from"] == "2026-04-23"
+    # Zone keys go through the same canon() as the cases card's keys.
+    assert set(ci["health_zones"]) == {"Bunia"}
+    assert ci["health_zones"]["Bunia"]["source"] == "province:Ituri"
+    # The global cutoff (deaths/positivity/labs) is untouched.
+    assert res["incomplete_from"] == "2026-05-05"
+
+
+def test_cases_incomplete_is_none_without_the_file(tmp_path, monkeypatch):
+    out = _seed_snapshot(tmp_path)
+    monkeypatch.setattr(ds, "DASHBOARD_PLOTS_DIR", out)
+    assert ds.load_trends_series(known_noms={"Bunia"})["cases_incomplete"] is None
+
+
+def test_cases_incomplete_is_none_for_invalid_json(tmp_path, monkeypatch):
+    out = _seed_snapshot(tmp_path)
+    _seed_windows(out / "2026-05-10", "{not json")
+    monkeypatch.setattr(ds, "DASHBOARD_PLOTS_DIR", out)
+    assert ds.load_trends_series(known_noms={"Bunia"})["cases_incomplete"] is None
+
+
+def test_cases_incomplete_tolerates_empty_blocks_written_as_lists(tmp_path, monkeypatch):
+    # jsonlite can write an empty named list as [] -- must not crash.
+    out = _seed_snapshot(tmp_path)
+    _seed_windows(out / "2026-05-10", {"national": {"days": 9, "source": "own"},
+                                       "provinces": [], "health_zones": []})
+    monkeypatch.setattr(ds, "DASHBOARD_PLOTS_DIR", out)
+    ci = ds.load_trends_series(known_noms={"Bunia"})["cases_incomplete"]
+    assert ci["national"]["from"] == "2026-05-01"
+    assert ci["provinces"] == {} and ci["health_zones"] == {}
+
+
 # --- discriminating tests: x-limits union ------------------------------------
 
 def test_load_trends_series_x_limits_union_all_three_families(tmp_path):

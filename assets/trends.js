@@ -84,6 +84,62 @@
     return name ? (d.x_limits[scale] || {})[name] || null : null;
   }
 
+  // Per-location incomplete-reporting window for the CASES card only
+  // (PAYLOAD.trends.cases_incomplete, from Processing_Code step 6's
+  // reporting_backfill/incomplete_windows.json): {days, from, source}.
+  // Health areas use their zone's window; anything missing falls back to
+  // national. Null when the payload has none -- the card then uses the global
+  // incomplete_from like the other cards. The deaths/positivity/lab cards are
+  // on other date axes (reporting/analysis date) with their own delays, so
+  // they keep the global window.
+  function casesIncomplete(scope, key) {
+    var d = trends(), w = d && d.cases_incomplete;
+    if (!w) return null;
+    var nat = w.national || null;
+    if (scope === "national" || !key) return nat;
+    var own = null;
+    if (scope === "province") own = (w.provinces || {})[key];
+    else if (scope === "health_zone") own = (w.health_zones || {})[key];
+    else if (scope === "health_area") own = (w.health_zones || {})[areaParts(key).zone];
+    if (own) return own;
+    // Falling back: say so, so the caption doesn't present national's own
+    // estimate as this location's.
+    return nat ? { days: nat.days, from: nat.from, source: "national" } : null;
+  }
+
+  function casesIncompleteFrom(scope, key) {
+    var ci = casesIncomplete(scope, key);
+    return ci ? ci.from : (trends() || {}).incomplete_from;
+  }
+
+  // tr() plus {name} substitution. Not engine.js's tf(): that echoes the key
+  // for a missing string, so its output can't be told apart from a miss.
+  function trf(key, vars, fallback) {
+    var s = tr(key, fallback);
+    Object.keys(vars || {}).forEach(function (k) {
+      s = s.split("{" + k + "}").join(String(vars[k]));
+    });
+    return s;
+  }
+
+  // Caption sentence for the cases card's band, naming its actual length and
+  // where the estimate came from when it isn't this location's own.
+  function casesIncompleteNote(scope, ci) {
+    var d = trends(), thr = d && d.cases_incomplete && d.cases_incomplete.threshold;
+    var pct = thr ? Math.round(thr * 100) : 90;
+    var text = trf("ui.trends_caption_incomplete_cases", { days: ci.days, pct: pct },
+      "Shaded region: the last {days} days, where fewer than {pct}% of cases have usually been reported yet (estimated from how earlier data exports filled in).");
+    var src = ci.source || "";
+    if (src.indexOf("province:") === 0 && scope !== "province") {
+      text += " " + trf("ui.trends_caption_incomplete_from_province", { province: src.slice(9) },
+        "Too few cases here for its own estimate, so {province}'s is used.");
+    } else if (src === "national" && scope !== "national") {
+      text += " " + tr("ui.trends_caption_incomplete_from_national",
+        "Too few cases here for its own estimate, so the national one is used.");
+    }
+    return text;
+  }
+
   // Expand a {start, <array>} entry into explicit ISO dates.
   function isoSeq(start, n) {
     var out = [], t = C.dayMs(start), i;
@@ -119,7 +175,7 @@
       width: dim.W, height: dim.H, pad: PAD,
       xStart: lim.start, xEnd: lim.end, yMax: yMax
     });
-    C.shadeRegion(svg, fr, d.incomplete_from, COLOR_INCOMPLETE);
+    C.shadeRegion(svg, fr, casesIncompleteFrom(scope, key), COLOR_INCOMPLETE);
     C.stackedBars(svg, fr, dates, [
       { values: entry.obs, color: COLOR_OBS },   // observed at the BOTTOM
       { values: entry.imp, color: COLOR_IMP }
@@ -293,18 +349,22 @@
 
   // Caption text, with the incomplete-reporting sentence appended ONLY when a
   // band is actually drawn -- the two vary together in the source.
-  function caption(key, fallback, banded) {
+  // `note` replaces the default incomplete sentence (the cases card's
+  // per-location band describes itself).
+  function caption(key, fallback, banded, note) {
     var text = tr(key, fallback);
     if (!banded) return text;
-    return text + ". " + tr("ui.trends_caption_incomplete",
-      "Shaded region: dates within the last week (reporting likely incomplete).");
+    return text + ". " + (note || tr("ui.trends_caption_incomplete",
+      "Shaded region: dates within the last week (reporting likely incomplete)."));
   }
 
   // True when the incomplete band falls inside this card's x range. When it
   // does not, no band is drawn and the caption loses its trailing sentence.
-  function banded(lim) {
+  // `from` overrides the global cutoff (the cases card's per-location one).
+  function banded(lim, from) {
     var d = trends();
-    return !!(d && d.incomplete_from && lim && d.incomplete_from <= lim.end);
+    var cut = from || (d && d.incomplete_from);
+    return !!(cut && lim && cut <= lim.end);
   }
 
   function addCaption(body, text) {
@@ -316,7 +376,9 @@
 
   // Fills one card: title, then either a chart plus its caption, or the
   // existing empty-state copy (owned by engine.js, which knows the selection).
-  function card(titleId, bodyId, titleKey, titleFallback, place, draw, capKey, capFallback, lim) {
+  // `band` (optional, cases card only): {from, note} -- that card's own
+  // incomplete cutoff and caption sentence instead of the global ones.
+  function card(titleId, bodyId, titleKey, titleFallback, place, draw, capKey, capFallback, lim, band) {
     var titleEl = document.getElementById(titleId), body = document.getElementById(bodyId);
     if (!body) return;
     var base = tr(titleKey, titleFallback);
@@ -331,7 +393,7 @@
     chart.className = "dc-chart";
     body.appendChild(chart);
     if (draw(chart)) {
-      addCaption(body, caption(capKey, capFallback, banded(lim)));
+      addCaption(body, caption(capKey, capFallback, banded(lim, band && band.from), band && band.note));
       return;
     }
     body.replaceChildren();
@@ -387,10 +449,12 @@
       labPlace = (global.zoneDisplayName && global.zoneDisplayName(zone)) || zone || place;
     }
     var lim = xLimits(scope, key);
+    var ci = casesIncomplete(scope, key);
+    var casesBand = ci ? { from: ci.from, note: casesIncompleteNote(scope, ci) } : null;
 
     card("trends-title", "trends-body", "ui.trends_panel", "Daily Cases by Symptom Onset",
       place, function (b) { return renderCases(b, scope, key); },
-      "ui.trends_caption_cases", "Confirmed cases by date of symptom onset", lim);
+      "ui.trends_caption_cases", "Confirmed cases by date of symptom onset", lim, casesBand);
     card("trends-deaths-title", "trends-deaths-body", "ui.trends_deaths_panel", "Cumulative Deaths",
       place, function (b) { return renderDeaths(b, scope, key); },
       "ui.trends_caption_deaths",
@@ -444,7 +508,8 @@
     render: render,
     _renderCases: renderCases, _renderDeaths: renderDeaths,
     _renderPositivity: renderPositivity, _renderLab: renderLab,
-    _labsForSelection: labsForSelection, _trends: trends, _xLimits: xLimits
+    _labsForSelection: labsForSelection, _trends: trends, _xLimits: xLimits,
+    _casesIncomplete: casesIncomplete
   };
 
   // engine.js boots synchronously and calls renderTrendsPlots() during that

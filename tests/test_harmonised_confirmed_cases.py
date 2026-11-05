@@ -25,6 +25,7 @@ def test_loader_reads_counts_and_normalises_names(tmp_path, monkeypatch):
     )
     out = _make_key_outputs(tmp_path, csv)
     monkeypatch.setattr(ds, "DASHBOARD_PLOTS_DIR", out)
+    monkeypatch.setattr(ds, "SPATIAL_INVASION_RISK_DIR", tmp_path / "no-sir-repo")
     result = ds.load_harmonised_confirmed_cases({"Rethy", "Nsona Mpangu"})
     assert result == {"Rethy": 5, "Nsona Mpangu": 3}
 
@@ -32,6 +33,7 @@ def test_loader_reads_counts_and_normalises_names(tmp_path, monkeypatch):
 def test_loader_returns_empty_when_absent(tmp_path, monkeypatch):
     out = _make_key_outputs(tmp_path, None)
     monkeypatch.setattr(ds, "DASHBOARD_PLOTS_DIR", out)
+    monkeypatch.setattr(ds, "SPATIAL_INVASION_RISK_DIR", tmp_path / "no-sir-repo")
     assert ds.load_harmonised_confirmed_cases({"Rethy"}) == {}
 
 

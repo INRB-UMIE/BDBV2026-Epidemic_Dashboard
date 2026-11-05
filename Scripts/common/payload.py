@@ -118,7 +118,14 @@ def build_shared_payload() -> dict:
               f"{len(trends['cases']['health_areas'])} health areas, "
               f"{len(trends['labs'])} labs, "
               f"incomplete from {trends['incomplete_from']}")
+        ci = trends.get("cases_incomplete")
+        if ci:
+            nat = (ci.get("national") or {}).get("days")
+            print(f"  trends cases band: national {nat} days, "
+                  f"{len(ci['provinces'])} provinces, {len(ci['health_zones'])} zones "
+                  "(per-location, from reporting_backfill/incomplete_windows.json)")
     rt = load_rt_estimates()
+    surveillance = load_surveillance()
     surveillance = load_surveillance()
     if surveillance:
         ct = surveillance.get("contact_tracing") or {}
