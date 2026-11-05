@@ -271,31 +271,36 @@
   }
 
   // --- Card 4: reproduction number (Rt) -------------------------------------
-  // PAYLOAD.rt (common/rt.py) has national and PROVINCE series only. Zone and
-  // area selections show their province's estimate, and the title/caption say
-  // so -- never present a provincial Rt as if it were the zone's own.
+  // PAYLOAD.rt (common/rt.py) holds one series per estimated location, grouped
+  // by spatial level. The card is shown ONLY for scopes whose level has
+  // estimates: today national + provinces, so it is hidden at Health Zone and
+  // Health Area scope. Adding zone or area rows to the Rt CSV switches it on
+  // there with no code change. A province-level estimate is never shown for a
+  // zone.
+  var RT_LEVEL_OF_SCOPE = {
+    national: "national", province: "provinces",
+    health_zone: "health_zones", health_area: "health_areas"
+  };
   function rtData() {
     return (typeof PAYLOAD !== "undefined" && PAYLOAD && PAYLOAD.rt) || null;
   }
-  function rtProvinceOf(scope, key) {
-    if (scope === "province") return key;
-    var zone = scope === "health_area" ? areaParts(key).zone : key;
-    return zone && global.zoneProvince ? global.zoneProvince(zone) : null;
+  // True when this scope's spatial level has at least one Rt series.
+  function rtLevelAvailable(scope) {
+    var rt = rtData(), level = RT_LEVEL_OF_SCOPE[scope];
+    if (!rt || !level) return false;
+    if (level === "national") return !!(rt.national && rt.national.dates && rt.national.dates.length);
+    return Object.keys(rt[level] || {}).length > 0;
   }
-  // -> {series, area, inherited} or null
+  // The selected location's own series, or null.
   function rtFor(scope, key) {
     var rt = rtData();
-    if (!rt) return null;
-    if (scope === "national") return rt.national ? { series: rt.national, area: null, inherited: false } : null;
-    if (!key) return null;
-    var prov = rtProvinceOf(scope, key);
-    var s = prov && (rt.provinces || {})[prov];
-    return s ? { series: s, area: prov, inherited: scope !== "province" } : { series: null, area: prov, inherited: scope !== "province" };
+    if (!rtLevelAvailable(scope)) return null;
+    if (scope === "national") return rt.national;
+    return (key && (rt[RT_LEVEL_OF_SCOPE[scope]] || {})[key]) || null;
   }
 
   function renderRt(host, scope, key, lim) {
-    var hit = rtFor(scope, key);
-    var e = hit && hit.series;
+    var e = rtFor(scope, key);
     if (!e || !e.dates.length) return false;
     var dates = e.dates;
     var dim = size(host), svg = newSvg(host, dim.W, dim.H);
@@ -342,16 +347,19 @@
   }
 
   function renderRtCard(scope, key, place) {
+    var cardEl = document.getElementById("trends-rt");
     var titleEl = document.getElementById("trends-rt-title");
     var body = document.getElementById("trends-rt-body");
     if (!body) return;
-    var hit = rtFor(scope, key);
-    var base = tr("ui.trends_rt_panel", "Reproduction Number (Rt)");
-    var rtPlace = scope === "national" ? place : (hit && hit.area) || place;
-    if (titleEl) titleEl.textContent = rtPlace ? base + " - " + rtPlace : base;
     body.replaceChildren();
-    var show = scope === "national" || !!key;
-    if (!show) {
+    // No estimates at this spatial level: hide the card outright rather than
+    // showing an empty state on every selection.
+    var available = rtLevelAvailable(scope);
+    if (cardEl) cardEl.style.display = available ? "" : "none";
+    if (!available) return;
+    var base = tr("ui.trends_rt_panel", "Reproduction Number (Rt)");
+    if (titleEl) titleEl.textContent = place ? base + " - " + place : base;
+    if (scope !== "national" && !key) {
       body.className = "panel-body trends-empty";
       body.innerHTML = "<p>" + (global.trendsEmptyMessage ? global.trendsEmptyMessage()
         : tr("ui.trends_no_plot", "No data available.")) + "</p>";
@@ -362,18 +370,19 @@
     body.className = "panel-body";
     body.appendChild(chart);
     if (renderRt(chart, scope, key, xLimits(scope, key))) {
-      var e = hit.series, rt = rtData();
+      var e = rtFor(scope, key), rt = rtData();
       var text = tr("ui.trends_caption_rt",
         "Estimated time-varying reproduction number: mean (line) and 95% interval (band). Above the dashed line (Rt = 1) the epidemic is growing.");
-      if (hit.inherited && global.tf) text += " " + global.tf("ui.trends_rt_inherited", { province: hit.area });
       if (global.tf) text += " " + global.tf("ui.trends_rt_asof", { date: longDay(e.dates[e.dates.length - 1]), run: longDay(rt.run_date) });
       addCaption(body, text);
       return;
     }
+    // Level is estimated, but not this location (e.g. a province with too
+    // few cases).
     body.replaceChildren();
     body.className = "panel-body trends-empty";
-    body.innerHTML = "<p>" + (hit && hit.area && global.tf
-      ? global.tf("ui.trends_rt_none_province", { province: hit.area })
+    body.innerHTML = "<p>" + (global.tf
+      ? global.tf("ui.trends_rt_none_place", { place: place || key || "" })
       : tr("ui.trends_rt_none", "No Rt estimate for this selection.")) + "</p>";
   }
 
@@ -618,7 +627,7 @@
   global.TrendsCharts = {
     render: render,
     _renderCases: renderCases, _renderDeaths: renderDeaths,
-    _renderPositivity: renderPositivity, _renderLab: renderLab, _rtFor: rtFor,
+    _renderPositivity: renderPositivity, _renderLab: renderLab, _rtFor: rtFor, _rtLevelAvailable: rtLevelAvailable,
     _labsForSelection: labsForSelection, _trends: trends, _xLimits: xLimits,
     _casesIncomplete: casesIncomplete
   };

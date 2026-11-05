@@ -34,12 +34,24 @@ def test_load_packs_national_and_provinces_sorted_by_date(tmp_path):
            "National,national,2026-10-01,1.1,0.9,1.3\n"
            "Ituri,province,2026-10-01,0.8,0.6,1.0\n"
            "Ituri,province,2026-10-01,0.85,0.65,1.05\n"     # duplicate: last wins
-           "Nowhere,zone,2026-10-01,9,9,9\n")                # unknown type ignored
+           "Nowhere,district,2026-10-01,9,9,9\n")            # unknown type ignored
     rt = load_rt_estimates(tmp_path)
     assert rt["run_date"] == "2026-11-02"
     assert rt["national"]["dates"] == ["2026-10-01", "2026-10-02"]
     assert rt["national"]["mean"] == [1.1, 1.2]
     assert rt["provinces"] == {"Ituri": {"dates": ["2026-10-01"], "mean": [0.85], "lo": [0.65], "hi": [1.05]}}
+    # Levels with no rows are present but empty: the Trends card hides on them.
+    assert rt["health_zones"] == {} and rt["health_areas"] == {}
+
+
+def test_load_accepts_zone_and_area_levels(tmp_path):
+    _write(tmp_path, "inrb_dashboard_Rt_data_20261102.csv",
+           "National,national,2026-10-01,1.1,0.9,1.3\n"
+           "Bunia,health_zone,2026-10-01,1.3,1.0,1.6\n"
+           "Bunia|Simbiliabo,health_area,2026-10-01,1.5,0.8,2.2\n")
+    rt = load_rt_estimates(tmp_path)
+    assert list(rt["health_zones"]) == ["Bunia"]
+    assert list(rt["health_areas"]) == ["Bunia|Simbiliabo"]
 
 
 def test_missing_file_gives_empty_dict(tmp_path):
@@ -78,3 +90,11 @@ def test_rt_card_markup_and_locale_keys():
         trends_js = (REPO / "Scripts" / "assets" / "trends.js").read_text(encoding="utf-8")
         for key in set(re.findall(r'"ui\.(trends_rt_[a-z_]+|trends_caption_rt)"', trends_js)):
             assert key in ui, f"{lang}: ui.{key} missing"
+
+
+def test_trends_rt_card_hides_when_level_not_estimated():
+    js = (REPO / "Scripts" / "assets" / "trends.js").read_text(encoding="utf-8")
+    assert "function rtLevelAvailable(" in js
+    assert 'cardEl.style.display = available ? "" : "none"' in js
+    # No fallback that shows a province's Rt for a zone/area selection.
+    assert "zoneProvince" not in js[js.index("Card 4: reproduction number"):js.index("function renderRt(")]

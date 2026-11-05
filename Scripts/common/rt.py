@@ -4,7 +4,11 @@ Time-varying reproduction number (Rt) estimates.
 Input: the newest ``Data/inrb_dashboard_Rt_data_<YYYYMMDD>.csv`` (the date in
 the file name is the estimation run date). Columns:
 
-    area, area_type (national | province), date, rt_mean, rt_lower_95, rt_upper_95
+    area, area_type, date, rt_mean, rt_lower_95, rt_upper_95
+
+``area_type`` is one of national, province, health_zone, health_area. A
+health_area row's ``area`` must be "<zone>|<area>", the key the Trends tab
+uses for health areas. Today's files carry national + province only.
 
 Output (``PAYLOAD.rt``, read by the Epidemiological Trends Rt card and the
 Current Snapshot Rt card)::
@@ -13,7 +17,11 @@ Current Snapshot Rt card)::
       "run_date": "2026-11-02", "source_file": "...csv",
       "national": {"dates": [...], "mean": [...], "lo": [...], "hi": [...]},
       "provinces": {"Ituri": {...same...}, ...},
+      "health_zones": {...}, "health_areas": {...},   # {} when not estimated
     }
+
+The Trends Rt card is shown only at scopes whose level is non-empty, so adding
+zone or area rows switches it on there with no front-end change.
 
 Returns ``{}`` when no file is present, so the build stays green and both
 cards show their empty state.
@@ -29,6 +37,9 @@ from common.paths import DATA_ROOT
 
 RT_GLOB = "inrb_dashboard_Rt_data_*.csv"
 _RUN_DATE_RE = re.compile(r"_(\d{8})\.csv$")
+# area_type -> payload key for the per-location levels.
+_LEVELS = {"national": None, "province": "provinces",
+           "health_zone": "health_zones", "health_area": "health_areas"}
 _REQUIRED = ("area", "area_type", "date", "rt_mean", "rt_lower_95", "rt_upper_95")
 
 
@@ -68,9 +79,9 @@ def load_rt_estimates(data_root: Path = DATA_ROOT) -> dict:
         kind = (r["area_type"] or "").strip().lower()
         area = (r["area"] or "").strip()
         date = (r["date"] or "").strip()[:10]
-        if kind not in ("national", "province") or not area or not date:
+        if kind not in _LEVELS or not area or not date:
             continue
-        key = ("national", "National") if kind == "national" else ("province", area)
+        key = ("national", "National") if kind == "national" else (kind, area)
         # Last row wins on a duplicated (area, date).
         series.setdefault(key, {})[date] = (_num(r["rt_mean"]), _num(r["rt_lower_95"]), _num(r["rt_upper_95"]))
 
@@ -89,10 +100,13 @@ def load_rt_estimates(data_root: Path = DATA_ROOT) -> dict:
         "source_file": path.name,
         "run_date": f"{run[:4]}-{run[4:6]}-{run[6:]}",
         "national": pack(series[("national", "National")]) if ("national", "National") in series else None,
-        "provinces": {a: pack(v) for (k, a), v in sorted(series.items()) if k == "province"},
     }
+    for kind, out_key in _LEVELS.items():
+        if out_key:
+            out[out_key] = {a: pack(v) for (k, a), v in sorted(series.items()) if k == kind}
     nat = out["national"]
     print(f"  Rt: {path.name} (run {out['run_date']}), national "
           f"{nat['dates'][0] + '..' + nat['dates'][-1] if nat else 'missing'}, "
-          f"{len(out['provinces'])} provinces")
+          f"{len(out['provinces'])} provinces, {len(out['health_zones'])} health zones, "
+          f"{len(out['health_areas'])} health areas")
     return out
