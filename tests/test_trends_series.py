@@ -1197,3 +1197,35 @@ def test_health_area_boundaries_missing_file_is_tolerated(tmp_path):
     fc, stats = ds.match_health_area_boundaries({"Bunia|Aero"}, tmp_path / "absent.geojson")
     assert fc == {"type": "FeatureCollection", "features": []}
     assert stats == {"areas": 1, "matched": 0}
+
+
+# --- deaths by onset date (Processing_Code step 3, Nov 2026) -----------------
+
+DEATHS_ONSET_CSV = (
+    "country,date_of_symptom_onset_imputed,daily_deaths,cumulative_deaths,spatial_scale,province,health_zone\n"
+    "DRC,2026-05-01,1,1,national,NA,NA\n"
+    "DRC,2026-05-03,2,3,national,NA,NA\n"
+)
+
+
+def test_deaths_pack_reads_onset_date_column(tmp_path):
+    p = tmp_path / "cumulative_positive_deaths.csv"
+    p.write_text(DEATHS_ONSET_CSV, encoding="utf-8")
+    out = ds._pack_trends_deaths(p)
+    assert out["national"]["national"] == {"start": "2026-05-01", "cum": [1, 1, 3], "daily": [1, 0, 2]}
+    assert ds._deaths_date_axis(p) == "onset"
+
+
+def test_deaths_date_axis_is_reporting_for_older_snapshots(tmp_path, monkeypatch):
+    out = _seed_snapshot(tmp_path)                 # DEATHS_CSV uses reporting_date
+    monkeypatch.setattr(ds, "DASHBOARD_PLOTS_DIR", out)
+    assert ds.load_trends_series(known_noms={"Bunia"})["deaths_date_axis"] == "reporting"
+
+
+def test_deaths_date_axis_is_onset_when_step3_writes_onset(tmp_path, monkeypatch):
+    out = _seed_snapshot(tmp_path)
+    (out / "2026-05-10" / "cumulative_positive_deaths.csv").write_text(DEATHS_ONSET_CSV, encoding="utf-8")
+    monkeypatch.setattr(ds, "DASHBOARD_PLOTS_DIR", out)
+    res = ds.load_trends_series(known_noms={"Bunia"})
+    assert res["deaths_date_axis"] == "onset"
+    assert res["deaths"]["national"]["cum"] == [1, 1, 3]

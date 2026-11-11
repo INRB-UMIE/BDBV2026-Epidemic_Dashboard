@@ -125,3 +125,29 @@ def test_surveillance_is_page_scoped_and_page_is_mapless():
     assert "stub-surveillance-testing" not in html
     other = chrome.render_page("trends", dict(MINIMAL, surveillance={"x": 1}))
     assert '"surveillance"' not in other
+
+
+def test_testing_carries_per_location_backfill_windows(tmp_path):
+    out = tmp_path / "outputs"
+    snap = out / "2026-10-15"
+    (snap / "reporting_backfill").mkdir(parents=True)
+    (out / "manifest.json").write_text(
+        json.dumps({"date": "2026-10-15", "incomplete_styling": {"days": 5}}), encoding="utf-8")
+    (snap / "rolling_positivity.csv").write_text(
+        "country,date_of_symptom_onset_imputed,confirmed_case,total_samples_analysed_daily,"
+        "spatial_scale,province,health_zone,daily_positivity_mean,daily_positivity_lower,daily_positivity_upper\n"
+        "NA,2026-05-01,2,5,national,NA,NA,0.4,0.1,0.7\n", encoding="utf-8")
+    (snap / "reporting_backfill" / "incomplete_windows.json").write_text(json.dumps({
+        "threshold": 0.9,
+        "national": {"days": 23, "source": "own"},
+        "provinces": {"Ituri": {"days": 16, "source": "own"}},
+        "health_zones": {"Bunia": {"days": 16, "source": "province:Ituri"}},
+    }), encoding="utf-8")
+
+    te = surv.load_testing(out)
+
+    assert te["incomplete_from"] == "2026-10-10"          # fallback: manifest days (5), not 7
+    w = te["incomplete_windows"]
+    assert w["national"]["from"] == "2026-09-22"
+    assert w["provinces"]["Ituri"]["from"] == "2026-09-29"
+    assert w["health_zones"]["Bunia"]["source"] == "province:Ituri"

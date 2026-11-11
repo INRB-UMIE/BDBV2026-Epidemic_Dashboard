@@ -585,6 +585,20 @@
     sel.innerHTML = html;
     sel.value = testScope;
   }
+  // Onset backfill window for the selected scope (testing.incomplete_windows,
+  // from Processing_Code step 6 -- the same windows as the Trends tab).
+  // A location with no entry falls back to national. Null when there is no
+  // window file: the chart then uses the fixed testing.incomplete_from.
+  function testWindow() {
+    var w = (testing() || {}).incomplete_windows;
+    if (!w) return null;
+    var nat = w.national || null;
+    if (testScope === "national") return nat;
+    var p = testScope.split(":"), kind = p[0], name = p.slice(1).join(":");
+    var own = kind === "province" ? (w.provinces || {})[name] : (w.health_zones || {})[name];
+    if (own) return own;
+    return nat ? { days: nat.days, from: nat.from, source: "national" } : null;
+  }
   function renderTests() {
     var te = testing(), e = testEntry();
     var h = host("surv-tests-chart");
@@ -594,7 +608,9 @@
     var neg = e.n.map(function (n, i) { return Math.max(0, n - e.pos[i]); });
     var fr = C.frame(s.svg, { width: s.W, height: s.H, pad: PAD,
       xStart: e.dates[0], xEnd: e.dates[e.dates.length - 1], yMax: maxOf(e.n) });
-    C.shadeRegion(s.svg, fr, te.incomplete_from, SHADE);
+    var tw = testWindow();
+    var shadeFrom = tw ? tw.from : te.incomplete_from;
+    C.shadeRegion(s.svg, fr, shadeFrom, SHADE);
     C.stackedBars(s.svg, fr, e.dates, [{ values: e.pos, color: INK }, { values: neg, color: BAR }]);
     var sc = function (v) { return v == null ? null : Math.min(1, Math.max(0, v)) * fr.yMax; };
     C.ciBand(s.svg, fr, e.dates, e.lo.map(sc), e.hi.map(sc), hexA(ALERT, 0.15));
@@ -615,9 +631,18 @@
       { label: tr("ui.surv.other_results", "Other results"), color: BAR, bar: true },
       { label: tr("ui.surv.legend_positivity", "5-day positivity, 95% CI (right axis)"), color: ALERT }
     ]);
-    caption("surv-tests", trf("ui.surv.tests_caption",
-      "{place}: {n} samples, {p} positive. By date of symptom onset. Shaded: last 7 days, reporting likely incomplete.",
-      { place: testPlace(), n: num(e.total_n), p: pct(e.total_n ? 100 * e.total_pos / e.total_n : null) }));
+    var days = tw ? tw.days : Math.round((C.dayMs(te.asof) - C.dayMs(te.incomplete_from)) / DAY);
+    var text = trf("ui.surv.tests_caption",
+      "{place}: {n} samples, {p} positive. By date of symptom onset. Shaded: last {days} days, reporting likely incomplete.",
+      { place: testPlace(), n: num(e.total_n), p: pct(e.total_n ? 100 * e.total_pos / e.total_n : null), days: days });
+    if (tw && tw.source === "national" && testScope !== "national") {
+      text += " " + tr("ui.trends_caption_incomplete_from_national",
+        "Too few cases here for its own estimate, so the national one is used.");
+    } else if (tw && String(tw.source || "").indexOf("province:") === 0 && testScope.indexOf("province:") !== 0) {
+      text += " " + trf("ui.trends_caption_incomplete_from_province",
+        "Too few cases here for its own estimate, so {province}'s is used.", { province: tw.source.slice(9) });
+    }
+    caption("surv-tests", text);
   }
 
   // --- Labs: weekly throughput + table ---------------------------------------------------
@@ -652,7 +677,8 @@
     weeklyChart("surv-labs-chart", {
       weeks: all,
       bars: shown.map(function (x) { return { values: x.vals, color: x.g.color }; }),
-      shadeFrom: mondayOf(te.incomplete_from),
+      // No incomplete band: by analysis date, which the onset backfill
+      // windows don't describe.
       tip: function (i) {
         var rows = shown.filter(function (x) { return x.vals[i] > 0; }).map(function (x) {
           return '<div><span class="dc-sw" style="background:' + x.g.color + '"></span>' + esc(x.g.label) + ": " + num(x.vals[i]) + "</div>";
@@ -664,7 +690,7 @@
     toggleLegend("surv-labs", groups.map(function (g) {
       return { id: g.id, label: g.label, color: g.color, bar: true, on: !labHidden[g.id] };
     }), function (id) { labHidden[id] = !labHidden[id]; renderLabs(); });
-    caption("surv-labs", tr("ui.surv.labs_caption", "By week of analysis. Shaded: most recent week, reporting likely incomplete."));
+    caption("surv-labs", tr("ui.surv.labs_caption", "By week of analysis."));
     renderLabTable(labs);
   }
   function renderLabTable(labs) {

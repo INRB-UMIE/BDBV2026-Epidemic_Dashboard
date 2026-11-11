@@ -109,3 +109,10 @@ def test_snapshot_locale_keys_match():
     used = set(re.findall(r'\btrf?\("([a-z_]+)"', js))
     missing = sorted(used - set(en))
     assert not missing, f"snapshot.js names ui.snap keys missing from the locales: {missing}"
+
+
+def test_summary_incomplete_from_uses_national_backfill_window():
+    p = _payload()
+    assert build_snapshot_summary(p)["incomplete_from"] == "2026-10-10"     # no windows: global
+    p["trends"]["cases_incomplete"] = {"national": {"days": 23, "from": "2026-09-22", "source": "own"}}
+    assert build_snapshot_summary(p)["incomplete_from"] == "2026-09-22"

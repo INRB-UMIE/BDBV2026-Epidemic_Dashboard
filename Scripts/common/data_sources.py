@@ -4307,6 +4307,21 @@ def _pack_trends_cases(path, canon=None):
     return packed
 
 
+def _deaths_date_axis(path):
+    """"onset" when cumulative_positive_deaths.csv is by symptom onset (step 3
+    since Nov 2026), else "reporting" (older snapshots). Decides whether the
+    deaths card can use the per-location onset backfill windows."""
+    try:
+        with open(path, newline="", encoding="utf-8") as fh:
+            header = next(csv.reader(fh), [])
+    except OSError:
+        return None
+    cols = {c.strip().lower() for c in header}
+    if "date_of_symptom_onset_imputed" in cols:
+        return "onset"
+    return "reporting" if "reporting_date" in cols else None
+
+
 def _pack_trends_deaths(path, canon=None):
     """{scale: {location: {start, cum[], daily[]}}} from cumulative_positive_deaths.csv.
 
@@ -4321,7 +4336,10 @@ def _pack_trends_deaths(path, canon=None):
             if resolved is None:
                 continue
             scale, loc = resolved
-            day = (row.get("reporting_date") or "").strip()
+            # Processing_Code step 3 now writes deaths by onset date; older
+            # snapshots used reporting_date. See _deaths_date_axis().
+            day = (row.get("date_of_symptom_onset_imputed")
+                   or row.get("reporting_date") or "").strip()[:10]
             if not _ISO_DATE_RE.match(day):
                 continue
             # OVERWRITE, last row wins -- deliberately unlike _pack_trends_cases
@@ -4848,6 +4866,8 @@ def load_trends_series(outputs_dir=None, known_noms=None, health_area_geojson=No
         return fn(path, *args)
 
     cases = maybe("status_aggregated.csv", _pack_trends_cases, canon) or {}
+    deaths_path = snap / "cumulative_positive_deaths.csv"
+    deaths_date_axis = _deaths_date_axis(deaths_path) if deaths_path.exists() else None
     deaths = maybe("cumulative_positive_deaths.csv", _pack_trends_deaths, canon) or {}
     positivity = maybe("rolling_positivity.csv", _pack_trends_positivity, canon) or {}
     labs_result = maybe("lab_positivity_aggregated.csv", _pack_trends_labs)
@@ -4869,8 +4889,10 @@ def load_trends_series(outputs_dir=None, known_noms=None, health_area_geojson=No
     # browser: the band would drift as a page ages between builds.
     incomplete_from = (date.fromisoformat(asof) - timedelta(days=incomplete_days)).isoformat()
 
-    # Per-location cutoffs for the CASES card only (onset-date counts), from
-    # Processing_Code step 6. None -> the card keeps the global incomplete_from.
+    # Per-location cutoffs from Processing_Code step 6 (confirmed-case
+    # completeness by days since onset). Used by every onset-date chart: cases,
+    # positivity, and deaths when deaths_date_axis == "onset". None -> those
+    # cards fall back to the global incomplete_from.
     cases_incomplete = _load_cases_incomplete_windows(snap, asof, canon)
 
     def slice_of(packed, scale):
@@ -4889,6 +4911,7 @@ def load_trends_series(outputs_dir=None, known_noms=None, health_area_geojson=No
         "incomplete_days": incomplete_days,
         "incomplete_from": incomplete_from,
         "cases_incomplete": cases_incomplete,
+        "deaths_date_axis": deaths_date_axis,
         "cases": {
             "national": slice_of(cases, "national").get("national"),
             "provinces": slice_of(cases, "province"),

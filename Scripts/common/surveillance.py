@@ -29,7 +29,8 @@ from pathlib import Path
 
 from common.paths import CT_ANALYTICS_OUTPUTS, DASHBOARD_PLOTS_DIR
 from common.data_sources import (
-    _fix_mojibake, _i0, _onset_manifest_dated_dir, _or_none, _parse_optional_float,
+    _fix_mojibake, _i0, _load_cases_incomplete_windows, _onset_manifest_dated_dir, _or_none,
+    _parse_optional_float,
     _round_prop,
 )
 
@@ -360,6 +361,15 @@ def _pack_labs(path: Path):
     return out
 
 
+def _manifest_incomplete_days(base: Path) -> int:
+    try:
+        m = json.loads((base / "manifest.json").read_text(encoding="utf-8")) or {}
+        d = int((m.get("incomplete_styling") or {}).get("days"))
+        return d if d > 0 else 7
+    except (OSError, ValueError, TypeError, json.JSONDecodeError):
+        return 7
+
+
 def load_testing(outputs_dir: Path | None = None):
     base = Path(outputs_dir if outputs_dir is not None else DASHBOARD_PLOTS_DIR)
     snap = _onset_manifest_dated_dir(base)
@@ -372,10 +382,17 @@ def load_testing(outputs_dir: Path | None = None):
     if not series and not labs:
         return None
     asof = snap.name
+    # Per-location onset backfill windows (Processing_Code step 6), the same
+    # ones the Trends tab uses. The tests chart is by onset date, so it shades
+    # from the selected location's window. Zone keys here are mojibake-fixed
+    # names, matching _pack_testing's keys (no canon step on either side).
+    windows = _load_cases_incomplete_windows(snap, asof)
     return {
         "asof": asof,
-        # Same 7-day incomplete-reporting window the Trends tab shades.
-        "incomplete_from": (date.fromisoformat(asof) - timedelta(days=7)).isoformat(),
+        # Fallback when there is no window file: the config's fixed window
+        # (manifest incomplete_styling.days, as the Trends tab uses).
+        "incomplete_from": (date.fromisoformat(asof) - timedelta(days=_manifest_incomplete_days(base))).isoformat(),
+        "incomplete_windows": windows,
         "national": (series or {}).get("national", {}).get("national"),
         "provinces": (series or {}).get("province", {}),
         "health_zones": (series or {}).get("healthzone", {}),

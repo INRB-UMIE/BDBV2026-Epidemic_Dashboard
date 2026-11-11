@@ -162,7 +162,10 @@ def build_snapshot_summary(payload: dict) -> dict:
             "ct": ct.get("data_cut"),
             "sequences": meta.get("updated") or genomic.get("data_build_date"),
         },
-        "incomplete_from": trends.get("incomplete_from"),
+        # The snapshot curve is national cases by onset: use the national
+        # backfill window (Processing_Code step 6) when there is one.
+        "incomplete_from": (((trends.get("cases_incomplete") or {}).get("national") or {}).get("from")
+                            or trends.get("incomplete_from")),
         "recent_days": RECENT_DAYS,
         "national": {
             "curve": _curve(t_cases.get("national"), t_pos.get("national")),

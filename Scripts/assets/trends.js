@@ -86,14 +86,14 @@
     return name ? (d.x_limits[scale] || {})[name] || null : null;
   }
 
-  // Per-location incomplete-reporting window for the CASES card only
-  // (PAYLOAD.trends.cases_incomplete, from Processing_Code step 6's
-  // reporting_backfill/incomplete_windows.json): {days, from, source}.
+  // Per-location incomplete-reporting window (PAYLOAD.trends.cases_incomplete,
+  // from Processing_Code step 6's reporting_backfill/incomplete_windows.json):
+  // {days, from, source}. Estimated from confirmed-case completeness by days
+  // since onset, and used for EVERY onset-date card: cases, positivity, and
+  // deaths (once step 3 writes deaths by onset; see deathsByOnset()).
   // Health areas use their zone's window; anything missing falls back to
-  // national. Null when the payload has none -- the card then uses the global
-  // incomplete_from like the other cards. The deaths/positivity/lab cards are
-  // on other date axes (reporting/analysis date) with their own delays, so
-  // they keep the global window.
+  // national. Null when the payload has none -- cards then use the global
+  // incomplete_from. Lab charts (analysis date) are not shaded at all.
   function casesIncomplete(scope, key) {
     var d = trends(), w = d && d.cases_incomplete;
     if (!w) return null;
@@ -107,6 +107,12 @@
     // Falling back: say so, so the caption doesn't present national's own
     // estimate as this location's.
     return nat ? { days: nat.days, from: nat.from, source: "national" } : null;
+  }
+
+  // True when cumulative_positive_deaths.csv is by onset date. Older
+  // snapshots are by reporting date, where an onset window would be wrong.
+  function deathsByOnset() {
+    return ((trends() || {}).deaths_date_axis) === "onset";
   }
 
   function casesIncompleteFrom(scope, key) {
@@ -210,7 +216,8 @@
       width: dim.W, height: dim.H, pad: PAD,
       xStart: lim.start, xEnd: lim.end, yMax: yMax
     });
-    C.shadeRegion(svg, fr, d.incomplete_from, COLOR_INCOMPLETE);
+    C.shadeRegion(svg, fr, deathsByOnset() ? casesIncompleteFrom(scope, key) : d.incomplete_from,
+      COLOR_INCOMPLETE);
     C.line(svg, fr, dates, entry.cum, COLOR_DEATHS, 1.6);
     // Points ONLY on days with a death reported -- a point every day would
     // imply an event on days where none occurred.
@@ -252,7 +259,7 @@
       width: dim.W, height: dim.H, pad: PAD,
       xStart: lim.start, xEnd: lim.end, yMax: yMax   // lower bound pinned at 0
     });
-    C.shadeRegion(svg, fr, d.incomplete_from, COLOR_INCOMPLETE);
+    C.shadeRegion(svg, fr, casesIncompleteFrom(scope, key), COLOR_INCOMPLETE);
     // The band's alpha lives in COLOR_POSITIVITY_BAND itself; ciBand sets no
     // opacity of its own, matching genomic.js's Ne band.
     C.ciBand(svg, fr, dates, lo, hi, COLOR_POSITIVITY_BAND);
@@ -420,15 +427,8 @@
       width: dim.W, height: dim.H, pad: PAD,
       xStart: lim.start, xEnd: lim.end, yMax: maxTotal
     });
-    // Per-lab, not per-frame. Lab charts share the GLOBAL x range, so
-    // incomplete_from always falls inside the frame -- but the band asserts
-    // "these recent dates may be under-reported", which says nothing useful
-    // about a lab that has no data in that window at all. The generator tests
-    // each lab's own analysis dates (incomplete_reporting_dates(lab_df$...))
-    // and omits the band when none fall in the window; match that.
-    if (dates.length && dates[dates.length - 1] >= d.incomplete_from) {
-      C.shadeRegion(svg, fr, d.incomplete_from, COLOR_INCOMPLETE);
-    }
+    // No incomplete-reporting band: lab charts are by analysis date, and the
+    // backfill windows only describe onset-date completeness.
     C.stackedBars(svg, fr, dates, [{ values: lab.n, color: COLOR_SAMPLES }]);
 
     // Positivity scaled onto the SAME primary axis by * max_total, exactly as
@@ -569,17 +569,21 @@
     var lim = xLimits(scope, key);
     var ci = casesIncomplete(scope, key);
     var casesBand = ci ? { from: ci.from, note: casesIncompleteNote(scope, ci) } : null;
+    var deathsOnset = deathsByOnset();
 
     card("trends-title", "trends-body", "ui.trends_panel", "Daily Cases by Symptom Onset",
       place, function (b) { return renderCases(b, scope, key); },
       "ui.trends_caption_cases", "Confirmed cases by date of symptom onset", lim, casesBand);
     card("trends-deaths-title", "trends-deaths-body", "ui.trends_deaths_panel", "Cumulative Deaths",
       place, function (b) { return renderDeaths(b, scope, key); },
-      "ui.trends_caption_deaths",
-      "Cumulative confirmed deaths by reporting date (death alerts with confirmed MVE classification)", lim);
+      deathsOnset ? "ui.trends_caption_deaths_onset" : "ui.trends_caption_deaths",
+      deathsOnset
+        ? "Cumulative confirmed deaths by date of symptom onset (death alerts with confirmed MVE classification)"
+        : "Cumulative confirmed deaths by reporting date (death alerts with confirmed MVE classification)",
+      lim, deathsOnset ? casesBand : null);
     card("trends-positivity-title", "trends-positivity-body", "ui.trends_positivity_panel", "Test Positivity",
       place, function (b) { return renderPositivity(b, scope, key); },
-      "ui.trends_caption_positivity", "5-day rolling test positivity by date of symptom onset", lim);
+      "ui.trends_caption_positivity", "5-day rolling test positivity by date of symptom onset", lim, casesBand);
 
     renderRtCard(scope, key, place);
 
@@ -629,7 +633,7 @@
     _renderCases: renderCases, _renderDeaths: renderDeaths,
     _renderPositivity: renderPositivity, _renderLab: renderLab, _rtFor: rtFor, _rtLevelAvailable: rtLevelAvailable,
     _labsForSelection: labsForSelection, _trends: trends, _xLimits: xLimits,
-    _casesIncomplete: casesIncomplete
+    _casesIncomplete: casesIncomplete, _deathsByOnset: deathsByOnset
   };
 
   // engine.js boots synchronously and calls renderTrendsPlots() during that

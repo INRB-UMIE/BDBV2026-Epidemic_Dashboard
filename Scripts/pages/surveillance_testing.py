@@ -81,7 +81,7 @@ _BODY = f"""<div id="surv-page">
     <h2 class="surv-section" data-i18n="ui.surv.section_testing">Testing</h2>
     <div class="surv-grid">
       {_card("surv-tests", "ui.surv.tests_title", "Samples tested and test positivity",
-             "ui.surv.tests_tip", "Bars: samples with a lab result, by date of symptom onset (dark: positive). Line (right axis): 5-day rolling test positivity with 95% Wilson interval. Shaded: last 7 days, reporting likely incomplete.",
+             "ui.surv.tests_tip", "Bars: samples with a lab result, by date of symptom onset (dark: positive). Line (right axis): 5-day rolling test positivity with 95% Wilson interval. Shaded: recent days where reporting is likely incomplete (window estimated from how earlier data exports filled in).",
              controls=_TEST_SCOPE, wide=True)}
       {_card("surv-labs", "ui.surv.labs_title", "Laboratory throughput",
              "ui.surv.labs_tip", "Samples analysed per week by laboratory, by date of analysis. Click a laboratory in the legend to hide or show it. The table lists every laboratory's totals.",
