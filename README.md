@@ -23,6 +23,7 @@ Please note that the epidemiological data presented here is based on work in pro
 - **ic_model_estimates.csv** (optional) Imperial College model date and case bounds for the tracker tooltip (`PAYLOAD.ic_model`; independent of INSP sitreps).
 - **caveats.csv** (optional) Per-metric warnings in the title-panel tracker: `metric` (`confirmed_cases`, `suspected_cases`, `confirmed_deaths`, `suspected_deaths`) and `warning` text; adds a mark beside the count and a footnote below.
 - **dashboard_plots/** (optional) The aggregated CSVs the Trends tab charts are drawn from (`manifest.json` + `<date>/{status_aggregated,cumulative_positive_deaths,rolling_positivity,lab_positivity_aggregated}.csv`), produced by [BDBV2026-Processed_Sensitive_Data](https://github.com/INRB-UMIE/BDBV2026-Processed_Sensitive_Data)'s `outputs/` directory. The build reads this directly, no copying into `Data/dashboard_plots/` needed. By default it assumes that repo is cloned as a sibling of this one (`../BDBV2026-Processed_Sensitive_Data/outputs`); set `DASHBOARD_PLOTS_DIR` to override. The same directory also holds pre-rendered SVGs of these charts, which the dashboard **no longer reads** — it draws them client-side from the CSVs instead (see `Scripts/assets/trends.js` and `Scripts/assets/charts.js`). The charts must stay faithful to the *data* produced by `BDBV2026-Processing_Code`'s `4-make-dashboard-plots.R`; their visual style follows the Genomic Epidemiology tab. See `docs/superpowers/specs/2026-09-22-trends-dynamic-charts-design.md`.
+- **inrb_dashboard_Rt_data_<YYYYMMDD>.csv** (optional) Time-varying reproduction number (Rt) estimates, national and by province (`area,area_type,date,rt_mean,rt_lower_95,rt_upper_95`; `area_type` is `national` or `province`). The newest file by the run date in its name is used (`Scripts/common/rt.py` → `PAYLOAD.rt`). Drawn as the Reproduction Number card on the Epidemiological Trends tab (zone and area selections show their province's estimate) and summarised on the Current Snapshot tab (national Rt and provinces ranked). To update, add a new dated file; older files can stay or be removed.
 - **health_area_aliases.csv** (optional) Hand-curated fixes for health areas whose line-list name differs from the health-area shapefile by more than a typo (columns `health_zone,health_area,shapefile_zone,shapefile_area`). Used only to attach map outlines to the Trends tab's Health Area scope; see below.
 - **Methods** Methods for dashboard, see below.
 - **ToS** ToS for dashboard, see below. 
@@ -34,13 +35,24 @@ structure" below), each of the four "real" pages has its own controls and
 responsive behaviour worth documenting here, since none of it is obvious
 from the code alone.
 
-**Current Snapshot** (`index.html`) — the main map, coloured by whichever
-layer is selected (confirmed/suspected cases, deaths, genomic sequencing,
-etc.), with a health-zone search, a layer-controls panel (top-left), and a
-zone-details panel (top-right). Both side panels are collapsible via the
-toggle in their header. On narrow screens (≤700px) the Leaflet zoom control
-is hidden (pinch-to-zoom is used instead) and both panels start collapsed to
-just their title bar, pinned to the top of the map pane.
+**Current Snapshot** (`index.html`) — two panes, like Trends and Spatial
+Risk: the map on the left (coloured by the selected layer, with the layer
+controls and legend floating over it and the health-zone search in its
+top-left corner) and a summary rail on the right, wider than the map by
+default (58%) and resizable via a drag handle (remembered per browser). With
+no zone selected the rail shows a national overview; clicking or searching a
+health zone switches it to that zone and fits the map to the zone plus the
+full extent of its Flowminder flow arrows. The rail summarises the other tabs:
+confirmed cases / deaths (and recoveries nationally), days since the last
+confirmed case, samples tested, genome sequences; daily cases by onset with the
+5-day test positivity overlay; the zone's national invasion-risk rank (or the
+top-5 zones nationally); contact tracing indicators (zone, else province);
+laboratories in the zone with samples and positivity; and a merged national /
+provincial / zone public-health-context news feed. It is drawn by
+`Scripts/assets/snapshot.js` from `PAYLOAD.snapshot_summary`
+(`Scripts/common/snapshot_summary.py`, a compact digest of the page-scoped
+Trends / Surveillance / Genomic slices) plus the shared payload. On narrow
+screens (≤700px) the map and rail stack vertically.
 
 **Epidemiological Trends** (`trends.html`) — a right-hand rail with
 National / Provincial / Health Zone / Health Area scope buttons and a location search
@@ -69,6 +81,30 @@ is collapsible and sits bottom-right of the map pane on wide screens
 tab at every screen size. On narrow screens the map and ranked table stack
 vertically instead of sitting side by side.
 
+**Surveillance and Testing** (`surveillance-testing.html`) — no map
+(`MAPLESS_VIEWS` in `common/chrome.py`). A scrolling grid of interactive
+cards drawn by `Scripts/assets/surveillance.js` (on `charts.js`, like the
+Trends tab) from `PAYLOAD.surveillance` (`Scripts/common/surveillance.py`):
+
+- *Contact tracing* (the contact tracing report's Fig 3A–D and 2A–B): new cases
+  and % already known as contacts, % that became source cases, follow-up
+  visits with a result, % of contacts fully followed up by zone and month,
+  patient-journey delays and median delays by week of onset, plus an
+  indicators-by-province table. Read from the **aggregate** tables in
+  BDBV2026-Contact_Tracing_Analytics (`outputs/<latest DATE>/tables/`,
+  override with `CT_ANALYTICS_OUTPUTS`). That repo's step 13
+  (`13_dashboard_tables.py`) writes the `dashboard_*` tables for the panels
+  the report draws from person-level data. Its `derived/` folder is never
+  read. Zone-month follow-up cells with fewer than 10 contacts are dropped
+  before they reach the page.
+- *Testing*: samples tested and 5-day positivity (national / province / zone)
+  and weekly laboratory throughput, from the same `rolling_positivity.csv` and
+  `lab_positivity_aggregated.csv` snapshot as the Trends tab.
+
+CI checks out the contact tracing repo with a `READ_CONTACT_TRACING_ANALYTICS`
+secret (Contents: Read). The step is `continue-on-error`, so without the secret
+the build still succeeds and the contact tracing cards show "no data".
+
 ### Narrow-screen (≤700px) behaviour shared by every page
 
 - The site header collapses to a compact stack; the SitRep/build-info line
@@ -76,9 +112,9 @@ vertically instead of sitting side by side.
   of sitting in the footer.
 - The page tabs become a single horizontally-scrollable row instead of
   wrapping onto multiple lines.
-- Every collapsible panel (layer controls, legends, plot cards) plus the
-  Current Snapshot zone-details panel auto-collapses to just its title bar
-  on load.
+- Every collapsible panel (layer controls, legends, plot cards)
+  auto-collapses to just its title bar on load. The Current Snapshot summary
+  rail is not collapsible; it stacks below the map instead.
 
 ### Health Area scope (Trends)
 
@@ -120,7 +156,7 @@ BDBV-Epidemic_Dashboard/
 │       ├── spatial_risk.py          # "Spatial Risk"               -> output/spatial-risk.html
 │       ├── context.py               # "Public Health Context"      -> output/context.html
 │       ├── clinical_symptoms.py     # "Clinical Symptoms" (stub)   -> output/clinical-symptoms.html
-│       ├── surveillance_testing.py  # "Surveillance and Testing" (stub) -> output/surveillance-testing.html
+│       ├── surveillance_testing.py  # "Surveillance and Testing" (map-free) -> output/surveillance-testing.html
 │       └── genomic_epidemiology.py  # "Genomic Epidemiology" (stub) -> output/genomic-epidemiology.html
 ├── layer_config.yaml               # map layer exclusions, labels, palettes (requires PyYAML)
 ├── requirements.txt                # Python dependencies for the build script
@@ -138,7 +174,7 @@ BDBV-Epidemic_Dashboard/
 │   ├── spatial-risk.html           # Spatial Risk
 │   ├── context.html                # Public Health Context
 │   ├── clinical-symptoms.html      # Clinical Symptoms (coming soon)
-│   ├── surveillance-testing.html   # Surveillance and Testing (coming soon)
+│   ├── surveillance-testing.html   # Surveillance and Testing
 │   ├── genomic-epidemiology.html   # Genomic Epidemiology (coming soon)
 │   └── assets/
 │       ├── dashboard.css
@@ -166,8 +202,8 @@ wouldn't need `matrices`/`flow_catalogs`) is a natural follow-up once you
 decide whether Trends/Context should keep their map-click interaction or
 move to a simpler dropdown-based selector.
 
-**"Coming soon" stub pages:** Clinical Symptoms, Surveillance and Testing,
-and Genomic Epidemiology are placeholders (`STUB_VIEWS` in
+**"Coming soon" stub pages:** Clinical Symptoms is a placeholder (Surveillance and
+Testing and Genomic Epidemiology have since been built out) (`STUB_VIEWS` in
 `common/chrome.py`) -- they get the same shared header/tabs/footer chrome
 and the same full map engine/payload underneath (currently hidden via a
 `stub-view` body class) as the four real pages, just showing a "coming

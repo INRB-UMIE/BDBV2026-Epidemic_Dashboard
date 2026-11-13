@@ -15,6 +15,9 @@ from __future__ import annotations
 from datetime import datetime, timezone
 
 from common.data_sources import *  # noqa: F401,F403 -- re-export all loaders/constants
+from common.surveillance import load_surveillance
+from common.snapshot_summary import build_snapshot_summary
+from common.rt import load_rt_estimates
 from common.paths import (
     BUILD_GEOJSON, OSRM_TRAVEL_TIME_CSV, DATA_ROOT, BUILD_DIR,
 )
@@ -121,6 +124,14 @@ def build_shared_payload() -> dict:
             print(f"  trends cases band: national {nat} days, "
                   f"{len(ci['provinces'])} provinces, {len(ci['health_zones'])} zones "
                   "(per-location, from reporting_backfill/incomplete_windows.json)")
+    rt = load_rt_estimates()
+    surveillance = load_surveillance()
+    surveillance = load_surveillance()
+    if surveillance:
+        ct = surveillance.get("contact_tracing") or {}
+        te = surveillance.get("testing") or {}
+        print(f"  surveillance: CT data cut {ct.get('data_cut', 'missing')}, "
+              f"testing asof {te.get('asof', 'missing')}, {len(te.get('labs') or [])} labs")
     _eff_active = {n for n, r in zone_data.items()
                    if int(r.get("effective_confirmed_cases") or 0) > 0}
     invasion_risk = load_invasion_risk_estimates(effective_active_noms=_eff_active)
@@ -189,7 +200,7 @@ def build_shared_payload() -> dict:
     # `data_build` (the companion BDBV2026-Data repo's release tag).
     dashboard_built_at = datetime.now(timezone.utc).isoformat()
 
-    return {
+    payload = {
         "asof": asof,
         "dashboard_built_at": dashboard_built_at,
         "travel_from": TRAVEL_FROM_ZONE,
@@ -227,6 +238,8 @@ def build_shared_payload() -> dict:
         "genome_markers_available": bool(genome_sequence_markers),
         "province_boundaries": province_boundaries,
         "trends": trends,
+        "surveillance": surveillance,
+        "rt": rt,
         "invasion_risk": invasion_risk,
         "import_force_pairwise": import_force_pairwise,
         "phr_context": phr_context_by_lang.get("en", {"national": [], "by_nom": {}}),
@@ -235,5 +248,9 @@ def build_shared_payload() -> dict:
         "confirmed_recency": confirmed_recency,
         "genomic": genomic,
     }
+    # Compact digest of the page-scoped slices above (trends, surveillance,
+    # genomic) for the Current Snapshot summary rail; see snapshot_summary.py.
+    payload["snapshot_summary"] = build_snapshot_summary(payload)
+    return payload
 
 
