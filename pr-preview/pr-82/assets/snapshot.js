@@ -78,10 +78,15 @@
   }
   function addDays(iso, n) { return new Date(C.dayMs(iso) + n * DAY).toISOString().slice(0, 10); }
 
+  // Card titles are uppercased by CSS; symbols like "Rt" must keep their
+  // case ("RT" reads as a different thing), so they're wrapped to opt out.
+  function keepCase(html) {
+    return html.replace(/\bRt\b/g, '<span class="snap-keepcase">Rt</span>');
+  }
   function card(id, title, body, opts) {
     opts = opts || {};
     return '<section class="snap-card' + (opts.wide ? " snap-wide" : "") + '" id="' + id + '">' +
-      "<h3><span>" + esc(title) + "</span>" + (opts.asof ? '<span class="snap-asof">' + esc(opts.asof) + "</span>" : "") + "</h3>" +
+      "<h3><span>" + keepCase(esc(title)) + "</span>" + (opts.asof ? '<span class="snap-asof">' + esc(opts.asof) + "</span>" : "") + "</h3>" +
       body + "</section>";
   }
   function tile(cls, value, label, sub) {

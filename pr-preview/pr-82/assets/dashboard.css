@@ -869,8 +869,10 @@
   }
   .stub-panel h2 { margin:0 0 8px 0; font-size:20px; color:#ffd28a; }
   .stub-panel p { margin:0; color:#bbb; font-size:14px; }
-  body.view-clinical-symptoms #stub-clinical-symptoms,
-  body.view-genomic-epidemiology #stub-genomic-epidemiology { display:block; }
+  /* Only on pages actually marked as stubs (STUB_VIEWS in common/chrome.py),
+     so a page that graduates to real content never shows its placeholder. */
+  body.stub-view.view-clinical-symptoms #stub-clinical-symptoms,
+  body.stub-view.view-genomic-epidemiology #stub-genomic-epidemiology { display:block; }
   #context-body.context-empty,
   #context-national-body.context-empty { color:#888; font-size:12px; }
   .context-pillar { margin:0 0 12px 0; padding-left:10px; border-left:3px solid #555; }
@@ -1591,12 +1593,28 @@
 
   /* Surveillance and Testing tab (surveillance.js). Cards follow the genomic
      tab's look (white card, warm border, hover-for-details title). */
-  #surv-page {
+  #surv-page, #clin-page {
     position:absolute; top:0; left:0; right:0; bottom:var(--view-chrome-height);
     overflow-y:auto; -webkit-overflow-scrolling:touch;
     background:#f6f5f2; color:#2a2a27; font-size:13px; line-height:1.4;
   }
-  #surv-inner { max-width:1280px; margin:0 auto; padding:14px 18px 28px; box-sizing:border-box; }
+  /* Left section menu + content. The menu sticks while #surv-page scrolls. */
+  #surv-layout { display:flex; align-items:flex-start; max-width:1460px; margin:0 auto; }
+  #surv-nav {
+    position:sticky; top:0; flex:0 0 172px; box-sizing:border-box;
+    padding:14px 0 14px 18px; align-self:flex-start;
+  }
+  #surv-nav ul { list-style:none; margin:0; padding:0; display:flex; flex-direction:column; gap:2px; }
+  #surv-nav .surv-nav-link {
+    display:block; width:100%; text-align:left; font:inherit; font-size:12.5px; line-height:1.3;
+    color:#5c574f; background:none; border:0; border-left:3px solid transparent;
+    padding:6px 8px 6px 10px; cursor:pointer; border-radius:0 3px 3px 0;
+  }
+  #surv-nav .surv-nav-link:hover { color:#01454f; background:#efede8; }
+  #surv-nav .surv-nav-link.active { color:#01454f; font-weight:700; border-left-color:#1a8c99; background:#fff; }
+  #surv-inner, #clin-inner { flex:1 1 auto; min-width:0; max-width:1280px; margin:0 auto; padding:14px 18px 28px; box-sizing:border-box; }
+  .surv-sec { scroll-margin-top:8px; }
+  .surv-subsection { margin:14px 0 6px; font-size:12.5px; font-weight:700; color:#01454f; }
   .surv-intro {
     background:#fff; border:1px solid #e7e3db; border-radius:4px; padding:8px 12px;
     font-size:11.5px; line-height:1.5; color:#5c574f;
@@ -1651,6 +1669,8 @@
   }
   .surv-legend { display:flex; flex-wrap:wrap; gap:4px 6px; margin:0 0 4px; min-height:0; }
   .surv-legend:empty { display:none; }
+  .surv-legend-note { flex-basis:100%; font-size:10.5px; line-height:1.4; color:#6f6a60; margin-top:2px; }
+  .surv-chip.surv-chip-action { font-weight:600; }
   .surv-chip, .surv-key {
     display:inline-flex; align-items:center; gap:5px;
     font-size:10.5px; color:#5c574f; background:#fff;
@@ -1667,6 +1687,12 @@
   .surv-sw.dashed { background:repeating-linear-gradient(90deg, var(--sw) 0 3px, transparent 3px 5px); }
   .surv-chart { position:relative; height:230px; min-height:230px; }
   .surv-wide .surv-chart { height:260px; min-height:260px; }
+  /* Clinical Symptoms tab (clinical.js) -- reuses the surv-* card styles. */
+  .surv-chart.clin-chart-symptoms, .surv-wide .surv-chart.clin-chart-symptoms { height:auto; min-height:120px; }
+  .clin-scope-row { margin-top:6px !important; }
+  .clin-scope-row .surv-select-label { font-size:12px; color:#5c574f; display:inline-flex; align-items:center; gap:6px; }
+  .clin-toggle { display:inline-flex; flex-wrap:wrap; gap:4px; }
+  .surv-chip.clin-opt.on { border-color:#1a8c99; background:#e8f3f4; color:#01454f; font-weight:600; }
   .surv-chart.surv-chart-journey { height:250px; min-height:250px; }
   .surv-chart svg { display:block; width:100%; height:100%; }
   .surv-journey-row:hover rect:first-child { fill:#f6f5f2; }
@@ -1690,9 +1716,22 @@
   }
   @media (max-width: 900px) {
     .surv-grid { grid-template-columns:minmax(0, 1fr); }
+    /* Menu becomes a sticky bar across the top. */
+    #surv-layout { display:block; }
+    #surv-nav {
+      position:sticky; top:0; z-index:5; padding:6px 10px;
+      background:#f6f5f2; border-bottom:1px solid #e7e3db;
+    }
+    #surv-nav ul { flex-direction:row; gap:4px; overflow-x:auto; -webkit-overflow-scrolling:touch; }
+    #surv-nav .surv-nav-link {
+      white-space:nowrap; width:auto; border-left:0; border-bottom:2px solid transparent;
+      border-radius:3px 3px 0 0; padding:5px 8px;
+    }
+    #surv-nav .surv-nav-link.active { border-bottom-color:#1a8c99; }
+    .surv-sec { scroll-margin-top:44px; }
   }
   @media (max-width: 700px) {
-    #surv-inner { padding:10px 10px 24px; }
+    #surv-inner, #clin-inner { padding:10px 10px 24px; }
     .surv-chart, .surv-wide .surv-chart { height:220px; min-height:220px; }
     .surv-tile-v { font-size:17px; }
   }
@@ -1793,6 +1832,9 @@
     text-transform:uppercase; color:#5c574f;
     display:flex; align-items:baseline; justify-content:space-between; gap:8px;
   }
+  .snap-card h3 .snap-keepcase { text-transform:none; }
+  /* Symbols such as "Rt" inside titles that the theme uppercases. */
+  .keep-case { text-transform:none !important; }
   .snap-card h3 .snap-asof { text-transform:none; letter-spacing:0; font-weight:400; color:#9c968b; font-size:10.5px; }
   .snap-kpis {
     grid-column:1 / -1;
