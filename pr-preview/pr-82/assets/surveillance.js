@@ -212,7 +212,7 @@
         "stroke-dasharray": sr.dashed ? "2,3" : "none", "stroke-linecap": "round"
       }));
       s.svg.appendChild(g);
-      C.points(s.svg, fr, xs, sr.values, sr.color, sr.dashed ? 0 : 2.4, null);
+      if (!sr.noPoints) C.points(s.svg, fr, xs, sr.values, sr.color, sr.dashed ? 0 : 2.4, null);
     });
     h.appendChild(s.svg);
     C.tooltip(h, s.svg, fr, function (day) { return o.tip(day); });
@@ -235,12 +235,6 @@
     var tiles = [];
     if (h) {
       tiles.push([num(h.cases), tr("ui.surv.tile_cases", "confirmed cases")]);
-      tiles.push([pct(100 * h.prev_contact_n / h.cases),
-        trf("ui.surv.tile_known", "already known as contacts when notified ({n})", { n: num(h.prev_contact_n) })]);
-      if (h.any_time_n != null) {
-        tiles.push([pct(100 * h.any_time_n / h.cases),
-          trf("ui.surv.tile_anytime", "on a contact list at any time ({n})", { n: num(h.any_time_n) })]);
-      }
       tiles.push([num(h.contacts), trf("ui.surv.tile_contacts", "contacts listed for {n} source cases", { n: num(h.source_cases) })]);
       if (h.fu_contacts) {
         tiles.push([pct(100 * h.fu_complete / h.fu_contacts, 0),
@@ -261,7 +255,7 @@
     el.hidden = !tiles.length;
   }
 
-  // --- Fig 3A / 3B: weekly CT coverage --------------------------------------------
+  // --- Fig 3B: weekly CT coverage (Fig 3A, % already known as contacts, removed) ---------
   var ctScope = "national";
   function ctWeekly() {
     var c = ct();
@@ -280,36 +274,6 @@
       return '<option value="' + esc(o[0]) + '"' + (o[0] === ctScope ? " selected" : "") + ">" + esc(o[1]) + "</option>";
     }).join("");
     sel.title = tr("ui.surv.ct_scope_title", "National, or one of the health zones with the most cases");
-  }
-
-  function renderKnown() {
-    var c = ct(), w = ctWeekly();
-    if (!w || !w.weeks.length) { empty("surv-ct-known-chart"); caption("surv-ct-known", ""); return; }
-    var incompleteFrom = addDays(c.meta.last_full_week, 7);
-    var ok = weeklyChart("surv-ct-known-chart", {
-      weeks: w.weeks,
-      bars: [{ values: w.new_cases, color: BAR,
-               colorAt: function (i) { return w.weeks[i] >= incompleteFrom ? BAR_LIGHT : BAR; } }],
-      line: { values: w.pct_prev_contact, color: ALERT },
-      lineMax: niceMax(maxOf(w.pct_prev_contact), 1),
-      secName: tr("ui.surv.axis_pct_known", "% known contact"),
-      shadeFrom: incompleteFrom,
-      tip: function (i) {
-        return '<div class="dc-tip-d">' + esc(weekLabel(w.weeks[i])) + "</div>" +
-          '<div><span class="dc-sw" style="background:' + BAR + '"></span>' +
-          esc(tr("ui.surv.new_cases", "New cases")) + ": " + num(w.new_cases[i]) + "</div>" +
-          '<div><span class="dc-sw" style="background:' + ALERT + '"></span>' +
-          esc(tr("ui.surv.known_before", "Known contact before notification")) + ": " + num(w.prev_contact[i]) +
-          (w.pct_prev_contact[i] != null ? " (" + pct(w.pct_prev_contact[i]) + ")" : "") + "</div>";
-      }
-    });
-    staticLegend("surv-ct-known", [
-      { label: tr("ui.surv.legend_new_cases", "New cases (week of notification)"), color: BAR, bar: true },
-      { label: tr("ui.surv.legend_pct_known", "% known contact before notification (right axis)"), color: ALERT }
-    ]);
-    caption("surv-ct-known", ok ? trf("ui.surv.known_caption",
-      "{place}. Percentages only for weeks with at least {min} cases. Shaded: incomplete weeks (after {date}).",
-      { place: ctPlaceLabel(), min: c.meta.min_cases_per_week_lines || 20, date: fmtDay(addDays(c.meta.last_full_week, 6)) }) : "");
   }
 
   function renderSource() {
@@ -585,6 +549,20 @@
     sel.innerHTML = html;
     sel.value = testScope;
   }
+  // Onset backfill window for the selected scope (testing.incomplete_windows,
+  // from Processing_Code step 6 -- the same windows as the Trends tab).
+  // A location with no entry falls back to national. Null when there is no
+  // window file: the chart then uses the fixed testing.incomplete_from.
+  function testWindow() {
+    var w = (testing() || {}).incomplete_windows;
+    if (!w) return null;
+    var nat = w.national || null;
+    if (testScope === "national") return nat;
+    var p = testScope.split(":"), kind = p[0], name = p.slice(1).join(":");
+    var own = kind === "province" ? (w.provinces || {})[name] : (w.health_zones || {})[name];
+    if (own) return own;
+    return nat ? { days: nat.days, from: nat.from, source: "national" } : null;
+  }
   function renderTests() {
     var te = testing(), e = testEntry();
     var h = host("surv-tests-chart");
@@ -594,7 +572,9 @@
     var neg = e.n.map(function (n, i) { return Math.max(0, n - e.pos[i]); });
     var fr = C.frame(s.svg, { width: s.W, height: s.H, pad: PAD,
       xStart: e.dates[0], xEnd: e.dates[e.dates.length - 1], yMax: maxOf(e.n) });
-    C.shadeRegion(s.svg, fr, te.incomplete_from, SHADE);
+    var tw = testWindow();
+    var shadeFrom = tw ? tw.from : te.incomplete_from;
+    C.shadeRegion(s.svg, fr, shadeFrom, SHADE);
     C.stackedBars(s.svg, fr, e.dates, [{ values: e.pos, color: INK }, { values: neg, color: BAR }]);
     var sc = function (v) { return v == null ? null : Math.min(1, Math.max(0, v)) * fr.yMax; };
     C.ciBand(s.svg, fr, e.dates, e.lo.map(sc), e.hi.map(sc), hexA(ALERT, 0.15));
@@ -615,9 +595,18 @@
       { label: tr("ui.surv.other_results", "Other results"), color: BAR, bar: true },
       { label: tr("ui.surv.legend_positivity", "5-day positivity, 95% CI (right axis)"), color: ALERT }
     ]);
-    caption("surv-tests", trf("ui.surv.tests_caption",
-      "{place}: {n} samples, {p} positive. By date of symptom onset. Shaded: last 7 days, reporting likely incomplete.",
-      { place: testPlace(), n: num(e.total_n), p: pct(e.total_n ? 100 * e.total_pos / e.total_n : null) }));
+    var days = tw ? tw.days : Math.round((C.dayMs(te.asof) - C.dayMs(te.incomplete_from)) / DAY);
+    var text = trf("ui.surv.tests_caption",
+      "{place}: {n} samples, {p} positive. By date of symptom onset. Shaded: last {days} days, reporting likely incomplete.",
+      { place: testPlace(), n: num(e.total_n), p: pct(e.total_n ? 100 * e.total_pos / e.total_n : null), days: days });
+    if (tw && tw.source === "national" && testScope !== "national") {
+      text += " " + tr("ui.trends_caption_incomplete_from_national",
+        "Too few cases here for its own estimate, so the national one is used.");
+    } else if (tw && String(tw.source || "").indexOf("province:") === 0 && testScope.indexOf("province:") !== 0) {
+      text += " " + trf("ui.trends_caption_incomplete_from_province",
+        "Too few cases here for its own estimate, so {province}'s is used.", { province: tw.source.slice(9) });
+    }
+    caption("surv-tests", text);
   }
 
   // --- Labs: weekly throughput + table ---------------------------------------------------
@@ -652,7 +641,8 @@
     weeklyChart("surv-labs-chart", {
       weeks: all,
       bars: shown.map(function (x) { return { values: x.vals, color: x.g.color }; }),
-      shadeFrom: mondayOf(te.incomplete_from),
+      // No incomplete band: by analysis date, which the onset backfill
+      // windows don't describe.
       tip: function (i) {
         var rows = shown.filter(function (x) { return x.vals[i] > 0; }).map(function (x) {
           return '<div><span class="dc-sw" style="background:' + x.g.color + '"></span>' + esc(x.g.label) + ": " + num(x.vals[i]) + "</div>";
@@ -664,7 +654,7 @@
     toggleLegend("surv-labs", groups.map(function (g) {
       return { id: g.id, label: g.label, color: g.color, bar: true, on: !labHidden[g.id] };
     }), function (id) { labHidden[id] = !labHidden[id]; renderLabs(); });
-    caption("surv-labs", tr("ui.surv.labs_caption", "By week of analysis. Shaded: most recent week, reporting likely incomplete."));
+    caption("surv-labs", tr("ui.surv.labs_caption", "By week of analysis."));
     renderLabTable(labs);
   }
   function renderLabTable(labs) {
@@ -673,17 +663,174 @@
     if (!labs.length) { el.replaceChildren(); return; }
     var head = [tr("ui.surv.col_lab", "Laboratory"), tr("ui.surv.col_location", "Location"),
       tr("ui.surv.col_samples", "Samples"), tr("ui.surv.col_positive", "Positive"),
-      tr("ui.surv.col_positivity", "Positivity"), tr("ui.surv.col_first", "First analysis"),
-      tr("ui.surv.col_last", "Latest analysis")];
+      tr("ui.surv.col_positivity", "Positivity"),
+      tr("ui.surv.col_tat", "Median turnaround, days (IQR)"), tr("ui.surv.col_tat2", "Analysed within 2 days"),
+      tr("ui.surv.col_first", "First analysis"), tr("ui.surv.col_last", "Latest analysis")];
     el.innerHTML = '<table class="surv-table"><thead><tr>' + head.map(function (x, i) {
-      return "<th" + (i >= 2 && i <= 4 ? ' class="num"' : "") + ">" + esc(x) + "</th>";
+      return "<th" + (i >= 2 && i <= 6 ? ' class="num"' : "") + ">" + esc(x) + "</th>";
     }).join("") + "</tr></thead><tbody>" + labs.map(function (l) {
       var loc = [l.health_zone, l.province].filter(Boolean).join(", ");
       return "<tr><td>" + esc(l.label) + (l.label !== l.code ? ' <span class="surv-muted">' + esc(l.code) + "</span>" : "") +
         "</td><td>" + esc(loc || "–") + '</td><td class="num">' + num(l.total_n) + '</td><td class="num">' + num(l.total_pos) +
         '</td><td class="num">' + pct(l.total_n ? 100 * l.total_pos / l.total_n : null) +
+        '</td><td class="num">' + (l.tat && l.tat.median != null ? esc(String(l.tat.median)) +
+          ' <span class="surv-muted">(' + l.tat.q25 + "–" + l.tat.q75 + ")</span>" : "–") +
+        '</td><td class="num">' + (l.tat && l.tat.within2 != null ? pct(100 * l.tat.within2, 0) : "–") +
         "</td><td>" + esc(l.first ? fmtDay(l.first) : "–") + "</td><td>" + esc(l.last ? fmtDay(l.last) : "–") + "</td></tr>";
     }).join("") + "</tbody></table>";
+  }
+
+  // --- Reporting completeness (Processing_Code step 6 backfill) ------------------------
+  // x is DAYS SINCE ONSET, not a date. C.frame only knows dates, so lag d is
+  // drawn at BF_BASE + d days and the ticks are relabelled as plain numbers.
+  var BF_BASE = "2000-01-01";
+  var bfScope = "national";
+  function backfill() { var te = testing(); return te && te.backfill; }
+  function bfLabel(key, e) {
+    return key === "national" ? tr("ui.trends_scope_national", "National") : (e && e.label) || key.split(":").slice(1).join(":");
+  }
+  function fillBackfillScope() {
+    var sel = host("surv-backfill-scope"), b = backfill();
+    if (!sel) return;
+    if (!b) { sel.innerHTML = ""; sel.hidden = true; return; }
+    sel.hidden = false;
+    var locs = b.locations || {};
+    if (!locs[bfScope]) bfScope = locs.national ? "national" : Object.keys(locs)[0];
+    var group = function (prefix) {
+      return Object.keys(locs).filter(function (k) { return k.indexOf(prefix) === 0; })
+        .sort(function (a, c) { return (locs[c].reference_cases || 0) - (locs[a].reference_cases || 0); })
+        .map(function (k) { return '<option value="' + esc(k) + '">' + esc(bfLabel(k, locs[k])) + "</option>"; }).join("");
+    };
+    var html = locs.national ? '<option value="national">' + esc(tr("ui.trends_scope_national", "National")) + "</option>" : "";
+    var pr = group("province:"), zn = group("zone:");
+    if (pr) html += '<optgroup label="' + esc(tr("ui.trends_scope_province", "Provincial")) + '">' + pr + "</optgroup>";
+    if (zn) html += '<optgroup label="' + esc(tr("ui.trends_scope_health_zone", "Health Zone")) + '">' + zn + "</optgroup>";
+    sel.innerHTML = html;
+    sel.value = bfScope;
+  }
+  function renderBackfill() {
+    var b = backfill(), e = b && (b.locations || {})[bfScope];
+    var h = host("surv-backfill-chart");
+    if (!h) return;
+    if (!e || !e.lag.length) {
+      empty("surv-backfill-chart"); caption("surv-backfill", "");
+      if (legendEl("surv-backfill")) legendEl("surv-backfill").replaceChildren();
+      return;
+    }
+    var thr = b.threshold || 0.9;
+    var xd = function (lag) { return addDays(BF_BASE, lag); };
+    var xs = e.lag.map(xd);
+    var p100 = function (v) { return v == null ? null : 100 * v; };
+    var maxLag = e.lag[e.lag.length - 1];
+    var yMax = Math.min(120, Math.max(100, maxOf(e.p90.map(p100))));
+    var ticks = [];
+    for (var k = 0; k <= maxLag; k += 10) ticks.push({ t: C.dayMs(xd(k)), label: String(k) });
+    var s = newSvg(h);
+    var fr = C.frame(s.svg, {
+      width: s.W, height: s.H, pad: { left: 40, right: 14, top: 12, bottom: 30 },
+      xStart: BF_BASE, xEnd: xd(maxLag), yMax: yMax, xTicks: ticks,
+      fmtY: function (v) { return v + "%"; }
+    });
+    // The grey window: lags still below the threshold. Unlike the onset charts'
+    // band (right edge), on this axis it sits on the LEFT, from 0 to `days`.
+    if (e.days) {
+      var x0 = fr.xToPx(C.dayMs(BF_BASE)), x1 = Math.min(fr.right, fr.xToPx(C.dayMs(xd(e.days))));
+      var g = C.svgEl("g", { "clip-path": "url(#" + fr.clipId + ")" });
+      g.appendChild(C.svgEl("rect", { x: x0, y: fr.top, width: Math.max(0, x1 - x0), height: fr.baseY - fr.top,
+        fill: SHADE, "fill-opacity": 0.25 }));
+      s.svg.appendChild(g);
+    }
+    var yT = fr.yToPx(100 * thr);
+    s.svg.appendChild(C.svgEl("line", { x1: fr.left, x2: fr.right, y1: yT, y2: yT,
+      stroke: ALERT, "stroke-width": 1, "stroke-dasharray": "2,3" }));
+    C.ciBand(s.svg, fr, xs, e.p10.map(p100), e.p90.map(p100), hexA(INK, 0.15));
+    C.line(s.svg, fr, xs, e.pooled.map(p100), INK, 1.8);
+    var ax = C.svgEl("text", { x: (fr.left + fr.right) / 2, y: fr.baseY + 26, "font-size": 9, fill: "#9c968b", "text-anchor": "middle" });
+    ax.textContent = tr("ui.surv.backfill_axis", "Days since symptom onset");
+    s.svg.appendChild(ax);
+    h.appendChild(s.svg);
+    C.tooltip(h, s.svg, fr, function (day) {
+      var lag = Math.round((C.dayMs(day) - C.dayMs(BF_BASE)) / DAY), i = e.lag.indexOf(lag);
+      if (i < 0 || e.pooled[i] == null) return null;
+      return '<div class="dc-tip-d">' + esc(trf("ui.surv.backfill_tip_day", "{n} days after onset", { n: lag })) + "</div>" +
+        "<div>" + pct(100 * e.pooled[i]) + (e.p10[i] != null ? ' <span class="dc-tip-ci">(' + pct(100 * e.p10[i]) + "–" + pct(100 * e.p90[i]) + ")</span>" : "") + "</div>";
+    });
+    staticLegend("surv-backfill", [
+      { label: tr("ui.surv.backfill_legend_line", "Share of cases reported"), color: INK },
+      { label: tr("ui.surv.backfill_legend_band", "10th–90th percentile across onset dates"), color: hexA(INK, 0.35), bar: true },
+      { label: trf("ui.surv.backfill_legend_thr", "{pct}% complete", { pct: Math.round(100 * thr) }), color: ALERT, dashed: true },
+      { label: tr("ui.surv.backfill_legend_window", "Shaded window on onset-date charts"), color: SHADE, bar: true }
+    ]);
+    caption("surv-backfill", trf("ui.surv.backfill_caption",
+      "{place}: based on {n} confirmed cases. About {pct}% of cases are in the line list {days} days after onset, so the last {days} days are shaded on this area's onset-date charts.",
+      { place: bfLabel(bfScope, e), n: num(e.reference_cases), pct: Math.round(100 * thr), days: e.days }));
+  }
+
+  // --- Laboratory turnaround time -------------------------------------------------------
+  // Default: the 6 busiest labs shown, the rest toggled on from the legend.
+  var TAT_TOP = 6, tatOn = null;
+  function renderTat() {
+    var te = testing(), tat = (te && te.turnaround) || {};
+    var labs = ((te && te.labs) || []).filter(function (l) { return tat[l.code] && tat[l.code].dates.length; });
+    // Labs only in the turnaround file (none today) still get a line.
+    Object.keys(tat).forEach(function (code) {
+      if (!labs.some(function (l) { return l.code === code; }) && tat[code].dates.length) labs.push({ code: code, label: code });
+    });
+    if (!labs.length) {
+      empty("surv-tat-chart"); caption("surv-tat", "");
+      if (legendEl("surv-tat")) legendEl("surv-tat").replaceChildren();
+      return;
+    }
+    if (!tatOn) {
+      tatOn = {};
+      labs.forEach(function (l, i) { tatOn[l.code] = i < TAT_TOP; });
+    }
+    var col = function (i) { return ZONE_PAL[i % ZONE_PAL.length]; };
+    var shown = labs.map(function (l, i) { return { l: l, color: col(i) }; }).filter(function (x) { return tatOn[x.l.code]; });
+    var lo = null, hi = null;
+    shown.forEach(function (x) {
+      var d = tat[x.l.code].dates;
+      if (lo == null || d[0] < lo) lo = d[0];
+      if (hi == null || d[d.length - 1] > hi) hi = d[d.length - 1];
+    });
+    var legend = function () {
+      toggleLegend("surv-tat", labs.map(function (l, i) {
+        return { id: l.code, label: l.label || l.code, color: col(i), on: !!tatOn[l.code] };
+      }), function (id) { tatOn[id] = !tatOn[id]; renderTat(); });
+    };
+    if (!shown.length) {
+      empty("surv-tat-chart", tr("ui.surv.tat_none_selected", "Select a laboratory in the legend."));
+      legend(); caption("surv-tat", ""); return;
+    }
+    // Axis capped near the 98th percentile (at least 7 days): one lab's
+    // 36-day spike would otherwise flatten everyone's usual 0-2 days. Marks
+    // are clipped at the top; the tooltip still gives the real value.
+    var vals = [].concat.apply([], shown.map(function (x) { return tat[x.l.code].median; }))
+      .filter(function (v) { return v != null; }).sort(function (a, b) { return a - b; });
+    var peak = vals.length ? vals[vals.length - 1] : 0;
+    var cap = Math.max(7, Math.ceil(vals.length ? vals[Math.floor(0.98 * (vals.length - 1))] : 0));
+    var yMax = Math.min(peak, cap) || 1, capped = peak > cap;
+    lineChart("surv-tat-chart", {
+      xs: [lo, hi], xStart: lo, xEnd: hi,
+      yMax: Math.max(yMax, 2),
+      series: shown.map(function (x) {
+        return { id: x.l.code, xs: tat[x.l.code].dates, values: tat[x.l.code].median, color: x.color, width: 1.4, noPoints: true };
+      }),
+      tip: function (day) {
+        var rows = shown.map(function (x) {
+          var t = tat[x.l.code], i = t.dates.indexOf(day);
+          if (i < 0 || t.median[i] == null) return "";
+          return '<div><span class="dc-sw" style="background:' + x.color + '"></span>' + esc(x.l.label || x.l.code) + ": " +
+            t.median[i] + ' <span class="dc-tip-ci">(IQR ' + t.q25[i] + "–" + t.q75[i] + ", n=" + num(t.n[i]) + ")</span></div>";
+        }).join("");
+        return rows ? '<div class="dc-tip-d">' + esc(fmtDay(day)) + "</div>" + rows : null;
+      }
+    });
+    legend();
+    caption("surv-tat", tr("ui.surv.tat_caption",
+      "Median days from sample collection to analysis, over the previous 5 days of analyses, by date of analysis.") +
+      (capped ? " " + trf("ui.surv.tat_capped", "Axis cut at {cap} days (highest value {max}); hover for values above it.",
+        { cap: cap, max: peak }) : ""));
   }
 
   // --- Province indicators table ----------------------------------------------------------
@@ -695,7 +842,7 @@
     var all = rows.slice().sort(function (a, b) { return b.cases - a.cases; });
     if (c.national) all.push(Object.assign({}, c.national, { area: tr("ui.surv.total", "All provinces"), _total: true }));
     var head = [tr("ui.surv.col_province", "Province"), tr("ui.surv.col_cases", "Cases"),
-      tr("ui.surv.col_pct_source", "% cases with contacts listed"), tr("ui.surv.col_pct_known", "% known contact before notification"),
+      tr("ui.surv.col_pct_source", "% cases with contacts listed"),
       tr("ui.surv.col_sources", "Source cases"), tr("ui.surv.col_contacts", "Contacts"),
       tr("ui.surv.col_med_contacts", "Median contacts per source"), tr("ui.surv.col_fu", "% contacts fully followed up (95% CI)")];
     el.innerHTML = '<table class="surv-table"><thead><tr>' + head.map(function (x, i) {
@@ -704,7 +851,7 @@
       var fu = r.pct_fu_complete == null ? "–" : pct(r.pct_fu_complete, 0) +
         (r.fu_lo != null ? ' <span class="surv-muted">(' + Math.round(r.fu_lo) + "–" + Math.round(r.fu_hi) + ")</span>" : "");
       return "<tr" + (r._total ? ' class="surv-total"' : "") + "><td>" + esc(r.area) + '</td><td class="num">' + num(r.cases) +
-        '</td><td class="num">' + pct(r.pct_cases_source) + '</td><td class="num">' + pct(r.pct_cases_prev_contact) +
+        '</td><td class="num">' + pct(r.pct_cases_source) +
         '</td><td class="num">' + num(r.source_cases) + '</td><td class="num">' + num(r.contacts) +
         '</td><td class="num">' + (r.med_contacts == null ? "–" : num(r.med_contacts)) + '</td><td class="num">' + fu + "</td></tr>";
     }).join("") + "</tbody></table>";
@@ -716,31 +863,35 @@
   // --- orchestration -------------------------------------------------------------------------
   function renderAll() {
     if (!data()) {
-      ["surv-ct-known", "surv-ct-source", "surv-fu-visits", "surv-fu21", "surv-journey", "surv-delays",
-       "surv-tests", "surv-labs"].forEach(function (id) { empty(id + "-chart"); });
+      ["surv-ct-source", "surv-fu-visits", "surv-fu21", "surv-journey", "surv-delays",
+       "surv-backfill", "surv-tests", "surv-labs", "surv-tat"].forEach(function (id) { empty(id + "-chart"); });
       renderProvinceTable();
       return;
     }
     renderHeadline();
     fillCtScope();
-    renderKnown();
     renderSource();
     renderVisits();
     renderFu21();
     if (ct() && ct().fu21) fillFuAdd();
     renderJourney();
     renderDelays();
+    fillBackfillScope();
+    renderBackfill();
     fillTestScope();
     renderTests();
     renderLabs();
+    renderTat();
     renderProvinceTable();
   }
 
   function wire() {
     var sel = host("surv-ct-scope");
-    if (sel) sel.addEventListener("change", function () { ctScope = sel.value || "national"; renderKnown(); renderSource(); });
+    if (sel) sel.addEventListener("change", function () { ctScope = sel.value || "national"; renderSource(); });
     var ts = host("surv-test-scope");
     if (ts) ts.addEventListener("change", function () { testScope = ts.value || "national"; renderTests(); });
+    var bs = host("surv-backfill-scope");
+    if (bs) bs.addEventListener("change", function () { bfScope = bs.value || "national"; renderBackfill(); });
     var add = host("surv-fu21-add");
     if (add) add.addEventListener("change", function () {
       if (add.value && fuShown.indexOf(add.value) < 0) fuShown.push(add.value);
