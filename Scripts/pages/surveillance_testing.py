@@ -40,6 +40,8 @@ _CT_SCOPE = ('<label class="surv-select-label"><span class="sr-only" data-i18n="
              '<select id="surv-ct-scope" class="surv-select"></select></label>')
 _TEST_SCOPE = ('<label class="surv-select-label"><span class="sr-only" data-i18n="ui.surv.scope">Area</span>'
                '<select id="surv-test-scope" class="surv-select"></select></label>')
+_BACKFILL_SCOPE = ('<label class="surv-select-label"><span class="sr-only" data-i18n="ui.surv.scope">Area</span>'
+                   '<select id="surv-backfill-scope" class="surv-select"></select></label>')
 _FU_ADD = ('<label class="surv-select-label"><span class="sr-only" data-i18n="ui.surv.add_zone">Add a health zone</span>'
            '<select id="surv-fu21-add" class="surv-select"></select></label>')
 
@@ -53,11 +55,9 @@ _BODY = f"""<div id="surv-page">
 
     <h2 class="surv-section" data-i18n="ui.surv.section_ct">Contact tracing</h2>
     <div class="surv-grid">
-      {_card("surv-ct-known", "ui.surv.known_title", "New cases and share already known as contacts",
-             "ui.surv.known_tip", "Bars: new confirmed cases per week of notification. Line (right axis): % of those cases who were already registered as a contact on or before the day they were notified. Percentages are shown only for weeks with at least 20 cases. Shaded weeks are incomplete.",
-             controls=_CT_SCOPE, wide=True)}
       {_card("surv-ct-source", "ui.surv.source_title", "New cases that became source cases",
-             "ui.surv.source_tip", "% of new cases each week who appear as the source case of at least one listed contact. Weeks with at least 20 cases. The shaded period is incomplete: contacts are often listed days after notification.")}
+             "ui.surv.source_tip", "% of new cases each week who appear as the source case of at least one listed contact. Weeks with at least 20 cases. The shaded period is incomplete: contacts are often listed days after notification.",
+             controls=_CT_SCOPE)}
       {_card("surv-fu-visits", "ui.surv.visits_title", "Follow-up visits with a recorded result",
              "ui.surv.visits_tip", "Bars: contact follow-up visits recorded per week. Line (right axis): % of those visits with a result (e.g. seen, symptomatic) recorded.")}
     </div>
@@ -78,6 +78,13 @@ _BODY = f"""<div id="surv-page">
              "ui.surv.delays_tip", "Median (line) and IQR (band) of days from symptom onset to each step, by week of onset. Weeks with at least 5 cases. Click a series in the legend to hide or show it.")}
     </div>
 
+    <h2 class="surv-section" data-i18n="ui.surv.section_backfill">Reporting completeness</h2>
+    <div class="surv-grid">
+      {_card("surv-backfill", "ui.surv.backfill_title", "How quickly confirmed cases are reported",
+             "ui.surv.backfill_tip", "Line: share of the eventual number of confirmed cases already in the line list, by days since symptom onset, estimated by comparing earlier data exports with the latest one. Band: 10th to 90th percentile across onset dates. Dotted line: 90% complete. Shaded: the days since onset still below 90%, which is the grey window shown on the onset-date charts for this area. Only areas with enough cases for their own estimate are listed.",
+             controls=_BACKFILL_SCOPE, wide=True)}
+    </div>
+
     <h2 class="surv-section" data-i18n="ui.surv.section_testing">Testing</h2>
     <div class="surv-grid">
       {_card("surv-tests", "ui.surv.tests_title", "Samples tested and test positivity",
@@ -85,6 +92,9 @@ _BODY = f"""<div id="surv-page">
              controls=_TEST_SCOPE, wide=True)}
       {_card("surv-labs", "ui.surv.labs_title", "Laboratory throughput",
              "ui.surv.labs_tip", "Samples analysed per week by laboratory, by date of analysis. Click a laboratory in the legend to hide or show it. The table lists every laboratory's totals.",
+             wide=True)}
+      {_card("surv-tat", "ui.surv.tat_title", "Laboratory turnaround time",
+             "ui.surv.tat_tip", "Days from sample collection to laboratory analysis: median over each laboratory's samples analysed in the previous 5 days, by date of analysis. Hover for the interquartile range and number of samples. Click a laboratory in the legend to hide or show it.",
              wide=True)}
     </div>
     <div class="surv-table-wrap" id="surv-labs-table"></div>

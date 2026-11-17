@@ -151,3 +151,77 @@ def test_testing_carries_per_location_backfill_windows(tmp_path):
     assert w["national"]["from"] == "2026-09-22"
     assert w["provinces"]["Ituri"]["from"] == "2026-09-29"
     assert w["health_zones"]["Bunia"]["source"] == "province:Ituri"
+
+
+def _seed_tat_and_backfill(tmp_path):
+    out = tmp_path / "outputs"
+    snap = out / "2026-11-11"
+    (snap / "reporting_backfill").mkdir(parents=True)
+    (out / "manifest.json").write_text(json.dumps({"date": "2026-11-11"}), encoding="utf-8")
+    (snap / "lab_positivity_aggregated.csv").write_text(
+        "lab_name,lab_name_long,health_zone,province,lab_analysis_date,earliest_analysed_sample,"
+        "confirmed_case,total_samples_analysed_daily,rolling_confirmed,rolling_total,"
+        "daily_positivity_mean,daily_positivity_lower,daily_positivity_upper\n"
+        "LBNIZ,Laboratoire Nizi,Nizi,Ituri,2026-05-02,2026-05-02,3,10,3,10,0.3,0.1,0.6\n", encoding="utf-8")
+    (snap / "lab_turnaround_aggregated.csv").write_text(
+        "lab_name,lab_analysis_date,samples_analysed_daily,rolling_samples,rolling_tat_median,"
+        "rolling_tat_q25,rolling_tat_q75,rolling_tat_mean,rolling_prop_within_2d,lab_name_long\n"
+        "LBNIZ,2026-05-03,4,4,2,1.5,3.25,2.1,0.666666,Laboratoire Nizi\n"
+        "LBNIZ,2026-05-02,6,6,1,1,2,1.2,0.9,Laboratoire Nizi\n", encoding="utf-8")
+    (snap / "lab_turnaround_summary.csv").write_text(
+        "lab_name,samples,tat_median,tat_q25,tat_q75,tat_mean,prop_within_2d,first_analysis,last_analysis,lab_name_long\n"
+        "LBNIZ,10,1.5,1,2.75,1.6,0.8,2026-05-02,2026-05-03,Laboratoire Nizi\n", encoding="utf-8")
+    (snap / "reporting_backfill" / "incomplete_windows.json").write_text(json.dumps({
+        "threshold": 0.9,
+        "national": {"days": 22, "source": "own", "reference_cases": 8875},
+        "provinces": {"Ituri": {"days": 16, "source": "own", "reference_cases": 4000},
+                      "Equateur": {"days": 22, "source": "national", "reference_cases": 0}},
+        "health_zones": {"Bunia": {"days": 16, "source": "province:Ituri", "reference_cases": 20}},
+    }), encoding="utf-8")
+    (snap / "reporting_backfill" / "backfill_completeness_by_lag.csv").write_text(
+        "spatial_scale,location,classification,days_since_onset,n_onset_dates,count,reference_count,"
+        "pooled_completeness,median_completeness,p10_completeness,p90_completeness\n"
+        "national,National,confirmed_case,1,50,10,100,0.1,0.1,0.05,0.2\n"
+        "national,National,confirmed_case,0,50,1,100,0.01,0.01,0,0.02\n"
+        "national,National,confirmed_case,61,50,99,100,0.99,0.99,0.9,1.05\n"
+        "province,Ituri,confirmed_case,0,50,1,100,0.02,NA,NA,NA\n"
+        "province,Equateur,confirmed_case,0,1,0,0,NA,NA,NA,NA\n"
+        "healthzone,Bunia,confirmed_case,0,1,0,0,0.5,NA,NA,NA\n", encoding="utf-8")
+    return out
+
+
+def test_turnaround_is_packed_per_lab_and_joined_to_the_lab_table(tmp_path):
+    te = surv.load_testing(_seed_tat_and_backfill(tmp_path))
+    t = te["turnaround"]["LBNIZ"]
+    assert t["dates"] == ["2026-05-02", "2026-05-03"]          # sorted
+    assert t["median"] == [1.0, 2.0] and t["q75"] == [2.0, 3.2] and t["n"] == [6, 4]
+    assert te["labs"][0]["tat"] == {"samples": 10, "median": 1.5, "q25": 1.0, "q75": 2.8, "within2": 0.8}
+
+
+def test_backfill_curves_only_for_locations_with_their_own_window(tmp_path):
+    b = surv.load_testing(_seed_tat_and_backfill(tmp_path))["backfill"]
+    assert b["threshold"] == 0.9
+    assert set(b["locations"]) == {"national", "province:Ituri"}   # borrowed windows left out
+    n = b["locations"]["national"]
+    assert n["lag"] == [0, 1]                                      # sorted, lag > 60 dropped
+    assert n["pooled"] == [0.01, 0.1] and n["p90"] == [0.02, 0.2]
+    assert n["days"] == 22 and n["reference_cases"] == 8875
+    assert b["locations"]["province:Ituri"]["p10"] == [None]
+
+
+def test_testing_without_turnaround_or_backfill_files(tmp_path):
+    out = _seed_tat_and_backfill(tmp_path)
+    snap = out / "2026-11-11"
+    for f in ("lab_turnaround_aggregated.csv", "lab_turnaround_summary.csv",
+              "reporting_backfill/backfill_completeness_by_lag.csv"):
+        (snap / f).unlink()
+    te = surv.load_testing(out)
+    assert te["turnaround"] == {} and te["backfill"] is None and "tat" not in te["labs"][0]
+
+
+def test_page_drops_known_contacts_card_and_adds_new_cards():
+    page = importlib.import_module("pages.surveillance_testing")
+    html = page.build_page(dict(MINIMAL, surveillance={"testing": None, "contact_tracing": None}))
+    assert "surv-ct-known" not in html
+    assert 'id="surv-backfill"' in html and 'id="surv-tat"' in html
+    assert 'id="surv-ct-scope"' in html                     # dropdown moved, not lost

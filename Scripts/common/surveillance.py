@@ -361,6 +361,135 @@ def _pack_labs(path: Path):
     return out
 
 
+def _r1(v):
+    return None if v is None else round(v, 1)
+
+
+def _pack_turnaround(path: Path):
+    """Per-lab 5-day rolling turnaround (days from sample collection to
+    analysis), from Processing_Code step 3's lab_turnaround_aggregated.csv.
+    {code: {dates, median, q25, q75, n, within2}} -- one point per analysis
+    date the lab has; values describe that lab's samples in the 5 days up to it.
+    """
+    out: dict[str, dict] = {}
+    for r in _read_csv(path):
+        code = _or_none(r.get("lab_name"))
+        day = (r.get("lab_analysis_date") or "").strip()[:10]
+        if not code or not _ISO_RE.match(day):
+            continue
+        lab = out.setdefault(code, {"days": {}})
+        lab["days"][day] = (
+            _r1(_f(r.get("rolling_tat_median"))), _r1(_f(r.get("rolling_tat_q25"))),
+            _r1(_f(r.get("rolling_tat_q75"))), _i0(_f(r.get("rolling_samples"))),
+            _round_prop(_f(r.get("rolling_prop_within_2d"))),
+        )
+    packed = {}
+    for code, lab in out.items():
+        ds = sorted(lab["days"])
+        d = lab["days"]
+        packed[code] = {
+            "dates": ds,
+            "median": [d[x][0] for x in ds], "q25": [d[x][1] for x in ds],
+            "q75": [d[x][2] for x in ds], "n": [d[x][3] for x in ds],
+            "within2": [d[x][4] for x in ds],
+        }
+    return packed
+
+
+def _pack_turnaround_summary(path: Path):
+    """{code: {samples, median, q25, q75, within2}} -- whole-period turnaround
+    per lab (lab_turnaround_summary.csv, step 3) for the lab table."""
+    out = {}
+    for r in _read_csv(path):
+        code = _or_none(r.get("lab_name"))
+        if not code:
+            continue
+        out[code] = {
+            "samples": _i0(_f(r.get("samples"))),
+            "median": _r1(_f(r.get("tat_median"))),
+            "q25": _r1(_f(r.get("tat_q25"))),
+            "q75": _r1(_f(r.get("tat_q75"))),
+            "within2": _round_prop(_f(r.get("prop_within_2d"))),
+        }
+    return out
+
+
+# Lags beyond this are not shown on the completeness curve (step 6's
+# max_days_since_onset is 60; the curve is flat well before).
+BACKFILL_MAX_LAG = 60
+
+
+def _pack_backfill(snap: Path, windows):
+    """Completeness-by-days-since-onset curves (Processing_Code step 6's
+    reporting_backfill/backfill_completeness_by_lag.csv) for national plus
+    every province / health zone that has its OWN backfill window -- the
+    others are too small for a curve worth reading, and borrow a window anyway.
+
+    {"threshold", "locations": {"national" | "province:<name>" | "zone:<name>":
+      {"label", "lag": [...], "pooled": [...], "p10": [...], "p90": [...],
+       "days", "reference_cases"}}} or None.
+    """
+    path = snap / "reporting_backfill" / "backfill_completeness_by_lag.csv"
+    if not path.exists() or not windows:
+        return None
+    raw = {}
+    try:
+        with open(snap / "reporting_backfill" / "incomplete_windows.json", encoding="utf-8") as fh:
+            raw = json.load(fh) or {}
+    except (OSError, json.JSONDecodeError):
+        raw = {}
+
+    def own(block, name):
+        e = (raw.get(block) or {}) if isinstance(raw.get(block), dict) else {}
+        e = e.get(name) or {}
+        return e if isinstance(e, dict) and e.get("source") == "own" else None
+
+    wanted = {}          # (scale, csv location) -> (key, label, window entry, raw entry)
+    if windows.get("national"):
+        wanted[("national", "National")] = ("national", None, windows["national"], raw.get("national") or {})
+    for name, w in (windows.get("provinces") or {}).items():
+        if w.get("source") == "own":
+            wanted[("province", name)] = ("province:" + name, name, w, own("provinces", name) or {})
+    for name, w in (windows.get("health_zones") or {}).items():
+        if w.get("source") == "own":
+            wanted[("healthzone", name)] = ("zone:" + name, name, w, own("health_zones", name) or {})
+
+    rows: dict[tuple, dict[int, tuple]] = {}
+    for r in _read_csv(path):
+        if (r.get("classification") or "confirmed_case") != "confirmed_case":
+            continue
+        k = ((r.get("spatial_scale") or "").strip(), _fix_mojibake((r.get("location") or "").strip()))
+        if k not in wanted:
+            continue
+        try:
+            lag = int(float(r.get("days_since_onset")))
+        except (TypeError, ValueError):
+            continue
+        if lag < 0 or lag > BACKFILL_MAX_LAG:
+            continue
+        rows.setdefault(k, {})[lag] = (
+            _round_prop(_f(r.get("pooled_completeness"))),
+            _round_prop(_f(r.get("p10_completeness"))),
+            _round_prop(_f(r.get("p90_completeness"))),
+        )
+    locations = {}
+    for k, by_lag in rows.items():
+        key, label, w, rw = wanted[k]
+        lags = sorted(by_lag)
+        locations[key] = {
+            "label": label,
+            "lag": lags,
+            "pooled": [by_lag[l][0] for l in lags],
+            "p10": [by_lag[l][1] for l in lags],
+            "p90": [by_lag[l][2] for l in lags],
+            "days": w.get("days"),
+            "reference_cases": rw.get("reference_cases"),
+        }
+    if not locations:
+        return None
+    return {"threshold": windows.get("threshold"), "locations": locations}
+
+
 def _manifest_incomplete_days(base: Path) -> int:
     try:
         m = json.loads((base / "manifest.json").read_text(encoding="utf-8")) or {}
@@ -379,7 +508,13 @@ def load_testing(outputs_dir: Path | None = None):
     pos_path, lab_path = snap / "rolling_positivity.csv", snap / "lab_positivity_aggregated.csv"
     series = _pack_testing(pos_path) if pos_path.exists() else None
     labs = _pack_labs(lab_path) if lab_path.exists() else []
-    if not series and not labs:
+    tat_path, tat_sum_path = snap / "lab_turnaround_aggregated.csv", snap / "lab_turnaround_summary.csv"
+    turnaround = _pack_turnaround(tat_path) if tat_path.exists() else {}
+    tat_summary = _pack_turnaround_summary(tat_sum_path) if tat_sum_path.exists() else {}
+    for lab in labs:
+        if lab["code"] in tat_summary:
+            lab["tat"] = tat_summary[lab["code"]]
+    if not series and not labs and not turnaround:
         return None
     asof = snap.name
     # Per-location onset backfill windows (Processing_Code step 6), the same
@@ -393,6 +528,8 @@ def load_testing(outputs_dir: Path | None = None):
         # (manifest incomplete_styling.days, as the Trends tab uses).
         "incomplete_from": (date.fromisoformat(asof) - timedelta(days=_manifest_incomplete_days(base))).isoformat(),
         "incomplete_windows": windows,
+        "backfill": _pack_backfill(snap, windows),
+        "turnaround": turnaround,
         "national": (series or {}).get("national", {}).get("national"),
         "provinces": (series or {}).get("province", {}),
         "health_zones": (series or {}).get("healthzone", {}),
