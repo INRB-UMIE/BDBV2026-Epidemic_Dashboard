@@ -56,3 +56,25 @@ def test_inject_genomic_report_links_fills_placeholder(monkeypatch):
     assert "a_FR.pdf" in locales["fr"]["ui"]["genomic"]["latest_report"]
     assert "{report_url}" not in locales["en"]["ui"]["genomic"]["latest_report"]
     assert urls["en"].endswith("a_EN.pdf")
+
+
+def test_ct_report_picks_newest_and_falls_back_to_english(monkeypatch):
+    monkeypatch.setattr(ds, "_list_genomic_report_filenames_from_github", lambda path=None: (
+        ["2026-10-14_Contact-Tracing_EN.pdf", "2026-11-12_Contact-Tracing_EN.pdf", "notes.pdf"]
+        if path == ds.CT_REPORTS_PATH else []))
+    locales = {
+        "en": {"ui": {"surv": {"intro": 'Latest report: <a href="{report_url}">{report_date}</a>.'}}},
+        "fr": {"ui": {"surv": {"intro": 'Dernier rapport : <a href="{report_url}">{report_date}</a>.'}}},
+    }
+    ds.inject_ct_report_links(locales)
+    en, fr = locales["en"]["ui"]["surv"]["intro"], locales["fr"]["ui"]["surv"]["intro"]
+    assert "Contact_Tracing/2026-11-12_Contact-Tracing_EN.pdf" in en and ">12 Nov 2026<" in en
+    assert "2026-11-12_Contact-Tracing_EN.pdf" in fr and ">12 nov. 2026<" in fr   # no FR yet: English report
+    assert "cdn.jsdelivr.net" in en and "{report" not in en + fr
+
+
+def test_ct_report_uses_fallback_when_github_unreachable(monkeypatch):
+    monkeypatch.setattr(ds, "_list_genomic_report_filenames_from_github", lambda path=None: None)
+    r = ds.resolve_latest_ct_report()
+    assert r["en"]["url"].endswith("/Contact_Tracing/2026-10-14_Contact-Tracing_EN.pdf")
+    assert r["fr"]["date"] == "2026-10-14"

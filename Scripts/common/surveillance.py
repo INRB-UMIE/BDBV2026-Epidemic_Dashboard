@@ -490,6 +490,83 @@ def _pack_backfill(snap: Path, windows):
     return {"threshold": windows.get("threshold"), "locations": locations}
 
 
+# Epi curve as seen in successive exports: mirrors 6-reporting-backfill.R's
+# "_epicurve_by_export" plot (snapshot_spacing_days / n_snapshots in
+# Processing_Code's pipeline_configs.json, and its 7-day centred average).
+EPICURVE_SPACING_DAYS = 14
+EPICURVE_N_EXPORTS = 7
+EPICURVE_ROLLING_DAYS = 7
+
+
+def _epicurve_exports(base: Path, asof: str) -> list[str]:
+    """Export dates nearest (on or before) asof, asof-14, asof-28, ... days."""
+    have = sorted(p.name for p in base.iterdir()
+                  if p.is_dir() and _DATE_DIR_RE.match(p.name) and p.name <= asof
+                  and (p / "status_aggregated.csv").exists())
+    if not have:
+        return []
+    ref = date.fromisoformat(asof)
+    picked = set()
+    for k in range(EPICURVE_N_EXPORTS):
+        target = (ref - timedelta(days=EPICURVE_SPACING_DAYS * k)).isoformat()
+        cands = [d for d in have if d <= target]
+        if cands:
+            picked.add(cands[-1])
+    return sorted(picked)
+
+
+def _confirmed_by_onset(path: Path, wanted: set) -> dict:
+    """{location key: {onset ISO: confirmed count}} from one export's
+    status_aggregated.csv, for the keys in `wanted` (national / province:<n> /
+    zone:<n>). Observed and imputed onset rows are summed."""
+    out: dict[str, dict[str, int]] = {}
+    for r in _read_csv(path):
+        scale = (r.get("spatial_scale") or "").strip().lower()
+        if scale == "national":
+            key = "national"
+        elif scale == "province":
+            key = "province:" + _fix_mojibake((r.get("province") or "").strip())
+        elif scale == "healthzone":
+            key = "zone:" + _fix_mojibake((r.get("health_zone") or "").strip())
+        else:
+            continue
+        if key not in wanted:
+            continue
+        day = (r.get("date_of_symptom_onset_imputed") or "").strip()[:10]
+        if not _ISO_RE.match(day):
+            continue
+        n = _i0(_f(r.get("confirmed_case")))
+        if n:
+            out.setdefault(key, {})
+            out[key][day] = out[key].get(day, 0) + n
+    return out
+
+
+def _pack_epicurves(base: Path, asof: str, onset_start: str, keys) -> dict | None:
+    """{"start", "exports": [ISO...], "curves": {key: [[7-day avg per day from
+    start to that export] per export]}}. Centred average, so the first and
+    last 3 days of each curve are null (as in the step 6 plot)."""
+    exports = _epicurve_exports(base, asof)
+    if not exports or not keys:
+        return None
+    wanted = set(keys)
+    half = EPICURVE_ROLLING_DAYS // 2
+    start = date.fromisoformat(onset_start)
+    curves: dict[str, list] = {k: [] for k in keys}
+    for e in exports:
+        counts = _confirmed_by_onset(base / e / "status_aggregated.csv", wanted)
+        n_days = (date.fromisoformat(e) - start).days + 1
+        days = [(start + timedelta(days=i)).isoformat() for i in range(max(0, n_days))]
+        for k in keys:
+            c = counts.get(k, {})
+            daily = [c.get(d, 0) for d in days]
+            avg = [None] * len(daily)
+            for i in range(half, len(daily) - half):
+                avg[i] = round(sum(daily[i - half:i + half + 1]) / EPICURVE_ROLLING_DAYS, 1)
+            curves[k].append(avg)
+    return {"start": onset_start, "exports": exports, "curves": curves}
+
+
 def _manifest_incomplete_days(base: Path) -> int:
     try:
         m = json.loads((base / "manifest.json").read_text(encoding="utf-8")) or {}
@@ -517,18 +594,28 @@ def load_testing(outputs_dir: Path | None = None):
     if not series and not labs and not turnaround:
         return None
     asof = snap.name
+    windows_for_backfill = _load_cases_incomplete_windows(snap, asof)
+    backfill = _pack_backfill(snap, windows_for_backfill)
+    if backfill:
+        onset_start = "2026-06-01"
+        try:
+            summ = json.loads((snap / "reporting_backfill" / "backfill_summary.json").read_text(encoding="utf-8"))
+            onset_start = (summ.get("onset_window") or [onset_start])[0] or onset_start
+        except (OSError, ValueError, TypeError, IndexError, AttributeError):
+            pass
+        backfill["epicurves"] = _pack_epicurves(base, asof, onset_start, list(backfill["locations"]))
     # Per-location onset backfill windows (Processing_Code step 6), the same
     # ones the Trends tab uses. The tests chart is by onset date, so it shades
     # from the selected location's window. Zone keys here are mojibake-fixed
     # names, matching _pack_testing's keys (no canon step on either side).
-    windows = _load_cases_incomplete_windows(snap, asof)
+    windows = windows_for_backfill
     return {
         "asof": asof,
         # Fallback when there is no window file: the config's fixed window
         # (manifest incomplete_styling.days, as the Trends tab uses).
         "incomplete_from": (date.fromisoformat(asof) - timedelta(days=_manifest_incomplete_days(base))).isoformat(),
         "incomplete_windows": windows,
-        "backfill": _pack_backfill(snap, windows),
+        "backfill": backfill,
         "turnaround": turnaround,
         "national": (series or {}).get("national", {}).get("national"),
         "provinces": (series or {}).get("province", {}),

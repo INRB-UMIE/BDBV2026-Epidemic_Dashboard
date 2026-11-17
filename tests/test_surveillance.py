@@ -225,3 +225,55 @@ def test_page_drops_known_contacts_card_and_adds_new_cards():
     assert "surv-ct-known" not in html
     assert 'id="surv-backfill"' in html and 'id="surv-tat"' in html
     assert 'id="surv-ct-scope"' in html                     # dropdown moved, not lost
+
+
+def test_epicurves_pick_spaced_exports_and_average(tmp_path):
+    out = tmp_path / "outputs"
+    hdr = "date_of_symptom_onset_imputed,onset_date_was_imputed,confirmed_case,spatial_scale,province,health_zone\n"
+    for d, rows in {"2026-06-08": "2026-06-04,FALSE,7,national,NA,NA\n",
+                    "2026-06-20": "2026-06-04,FALSE,7,national,NA,NA\n2026-06-04,TRUE,7,national,NA,NA\n"
+                                  "2026-06-04,FALSE,3,healthzone,NA,Bunia\n",
+                    "2026-06-22": "2026-06-04,FALSE,14,national,NA,NA\n"}.items():
+        (out / d).mkdir(parents=True)
+        (out / d / "status_aggregated.csv").write_text(hdr + rows, encoding="utf-8")
+    ec = surv._pack_epicurves(out, "2026-06-22", "2026-06-01", ["national", "zone:Bunia"])
+    # 22 Jun itself, then nearest on/before 8 Jun; 20 Jun is skipped (not on the 14-day grid).
+    assert ec["exports"] == ["2026-06-08", "2026-06-22"]
+    nat = ec["curves"]["national"]
+    assert len(nat[0]) == 8 and len(nat[1]) == 22            # start .. export date
+    assert nat[0][:3] == [None, None, None] and nat[0][-3:] == [None, None, None]
+    assert nat[0][3] == 1.0 and nat[1][3] == 2.0               # 7/7 and 14/7 on 4 Jun
+    assert ec["curves"]["zone:Bunia"][1][3] == 0.0             # Bunia only in the skipped export
+
+
+def test_page_has_no_separate_follow_up_heading():
+    page = importlib.import_module("pages.surveillance_testing")
+    html = page.build_page(dict(MINIMAL, surveillance={"testing": None, "contact_tracing": None}))
+    assert "ui.surv.section_fu" not in html
+    assert 'id="surv-backfill-curve"' in html
+
+
+def test_page_sections_order_menu_and_province_table_under_contact_tracing():
+    page = importlib.import_module("pages.surveillance_testing")
+    html = page.build_page(dict(MINIMAL, surveillance={"testing": None, "contact_tracing": None}))
+    order = ["surv-sec-ct", "surv-sec-testing", "surv-sec-delays", "surv-sec-backfill"]
+    start = html.index('id="surv-nav"')
+    nav = html[start:html.index("</nav>", start)]
+    assert [nav.index('data-target="%s"' % s) for s in order] == sorted(nav.index('data-target="%s"' % s) for s in order)
+    body = [html.index('id="%s"' % s) for s in order]
+    assert body == sorted(body)
+    ct = html[body[0]:body[1]]
+    assert 'id="surv-province-table"' in ct and 'id="surv-fu21"' in ct
+
+
+def test_public_health_context_tab_hidden_but_page_still_built():
+    html = chrome.render_page("map", dict(MINIMAL))
+    assert 'data-view="context"' not in html                      # not in the Snapshot tab bar
+    assert 'data-view="trends"' in html
+    ctx = importlib.import_module("pages.context").build_page(dict(MINIMAL, phr_context={}))
+    assert 'data-view="context"' in ctx                           # own page still shows its tab
+
+
+def test_trends_rt_title_keeps_case():
+    html = chrome.render_page("trends", dict(MINIMAL))
+    assert 'Reproduction Number (<span class="keep-case">Rt</span>)' in html

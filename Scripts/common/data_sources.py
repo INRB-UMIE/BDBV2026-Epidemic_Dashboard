@@ -235,6 +235,7 @@ __all__ = [
     'pick_latest_genomic_report_files',
     'resolve_latest_genomic_report_urls',
     'inject_genomic_report_links',
+    'inject_ct_report_links',
     'build_i18n_payload',
     'load_data_build_info',
     'load_genomic_products',
@@ -296,6 +297,13 @@ GENOMIC_REPORT_PDF_RE = re.compile(
 GENOMIC_REPORT_FALLBACK_FILES = {
     "en": "2026-09-23_Report-Genomics_EN.pdf",
     "fr": "2026-09-23_Rapport-Genomique_FR.pdf",
+}
+# Contact tracing reports: same repo, same filename pattern, Contact_Tracing/.
+# Linked from the Surveillance and Testing intro (ui.surv.intro). A language
+# with no report of its own links to the English one.
+CT_REPORTS_PATH = os.environ.get("CT_REPORTS_PATH", "Contact_Tracing").strip() or "Contact_Tracing"
+CT_REPORT_FALLBACK_FILES = {
+    "en": "2026-10-14_Contact-Tracing_EN.pdf",
 }
 
 # Slugs for the Bundibugyo Ebola sitrep series on insp.cd (not generic MVE carousel pages).
@@ -3848,12 +3856,13 @@ def parse_genomic_report_filename(name: str) -> tuple[datetime.date, str] | None
     return None
 
 
-def genomic_report_pdf_url(filename: str) -> str:
-    """CDN URL that serves the PDF with ``Content-Type: application/pdf``."""
+def genomic_report_pdf_url(filename: str, path: str | None = None) -> str:
+    """CDN URL that serves the PDF with ``Content-Type: application/pdf``.
+    ``path`` is the folder in the reports repo (default: the genomic one)."""
     name = (filename or "").lstrip("/")
     return (
         f"https://cdn.jsdelivr.net/gh/{GENOMIC_REPORTS_REPO}"
-        f"@{GENOMIC_REPORTS_REF}/{GENOMIC_REPORTS_PATH}/{name}"
+        f"@{GENOMIC_REPORTS_REF}/{path or GENOMIC_REPORTS_PATH}/{name}"
     )
 
 
@@ -3873,11 +3882,12 @@ def pick_latest_genomic_report_files(names: list[str]) -> dict[str, str]:
     return {lang: filename for lang, (_date, filename) in best.items()}
 
 
-def _list_genomic_report_filenames_from_github() -> list[str] | None:
-    """List PDF names under Reports/Genomic via the GitHub Contents API."""
+def _list_genomic_report_filenames_from_github(path: str | None = None) -> list[str] | None:
+    """List PDF names in one reports-repo folder (default Genomic) via the
+    GitHub Contents API."""
     api = (
         f"https://api.github.com/repos/{GENOMIC_REPORTS_REPO}"
-        f"/contents/{GENOMIC_REPORTS_PATH}?ref={GENOMIC_REPORTS_REF}"
+        f"/contents/{path or GENOMIC_REPORTS_PATH}?ref={GENOMIC_REPORTS_REF}"
     )
     req = urllib.request.Request(
         api,
@@ -3892,10 +3902,10 @@ def _list_genomic_report_filenames_from_github() -> list[str] | None:
         ) as resp:
             payload = json.loads(resp.read().decode("utf-8"))
     except (urllib.error.URLError, TimeoutError, OSError, json.JSONDecodeError) as exc:
-        print(f"  NOTE: genomic reports listing failed ({api}): {exc}")
+        print(f"  NOTE: reports listing failed ({api}): {exc}")
         return None
     if not isinstance(payload, list):
-        print(f"  NOTE: genomic reports listing returned non-list payload from {api}")
+        print(f"  NOTE: reports listing returned non-list payload from {api}")
         return None
     names: list[str] = []
     for item in payload:
@@ -3920,6 +3930,53 @@ def resolve_latest_genomic_report_urls() -> dict[str, str]:
         source = "github" if lang in picked else "fallback"
         print(f"  genomic report ({lang}, {source}): {filename}")
     return urls
+
+
+def resolve_latest_ct_report() -> dict[str, dict]:
+    """``{lang: {"url", "date"}}`` for the newest contact tracing report per
+    language in Contact_Tracing/, falling back to CT_REPORT_FALLBACK_FILES
+    when GitHub can't be reached. Languages without a report use English's."""
+    names = _list_genomic_report_filenames_from_github(CT_REPORTS_PATH)
+    picked = pick_latest_genomic_report_files(names or [])
+    out: dict[str, dict] = {}
+    for lang in SUPPORTED_LANGS:
+        filename = picked.get(lang) or picked.get("en") or CT_REPORT_FALLBACK_FILES.get(lang) \
+            or CT_REPORT_FALLBACK_FILES.get("en")
+        if not filename:
+            continue
+        parsed = parse_genomic_report_filename(filename)
+        out[lang] = {
+            "url": genomic_report_pdf_url(filename, CT_REPORTS_PATH),
+            "date": parsed[0].isoformat() if parsed else None,
+        }
+        source = "github" if (picked.get(lang) or picked.get("en")) else "fallback"
+        print(f"  contact tracing report ({lang}, {source}): {filename}")
+    return out
+
+
+_MONTHS = {
+    "en": ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"],
+    "fr": ["janv.", "févr.", "mars", "avr.", "mai", "juin", "juil.", "août", "sept.", "oct.", "nov.", "déc."],
+}
+
+
+def inject_ct_report_links(locales: dict[str, dict]) -> dict[str, dict]:
+    """Fill ``{report_url}`` / ``{report_date}`` in ``ui.surv.intro``."""
+    reports = resolve_latest_ct_report()
+    for lang in SUPPORTED_LANGS:
+        surv = ((locales.get(lang) or {}).get("ui") or {}).get("surv")
+        if not isinstance(surv, dict):
+            continue
+        template = surv.get("intro")
+        if not isinstance(template, str) or "{report_url}" not in template:
+            continue
+        rep = reports.get(lang) or reports.get("en") or {}
+        d = rep.get("date")
+        months = _MONTHS.get(lang, _MONTHS["en"])
+        label = f"{int(d[8:10])} {months[int(d[5:7]) - 1]} {d[:4]}" if d else ""
+        surv["intro"] = template.replace("{report_url}", rep.get("url") or "").replace("{report_date}", label)
+        surv["ct_report_url"] = rep.get("url") or ""
+    return reports
 
 
 def inject_genomic_report_links(locales: dict[str, dict]) -> dict[str, str]:
@@ -3967,6 +4024,7 @@ def localize_layers(layers: list[dict], locale: dict) -> list[dict]:
 def build_i18n_payload(layers_en: list[dict], phr_context: dict[str, dict]) -> dict:
     locales = load_locales()
     inject_genomic_report_links(locales)
+    inject_ct_report_links(locales)
     layers_by_lang = {
         lang: localize_layers(layers_en, locales.get(lang, {}))
         for lang in SUPPORTED_LANGS

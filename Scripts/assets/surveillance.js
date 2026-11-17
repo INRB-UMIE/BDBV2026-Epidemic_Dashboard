@@ -132,6 +132,26 @@
     });
   }
   function staticLegend(cardId, items) { toggleLegend(cardId, items, null); }
+  // A sentence appended after a card's legend chips.
+  function legendNote(cardId, text) {
+    var el = legendEl(cardId);
+    if (!el || !text) return;
+    var n = document.createElement("span");
+    n.className = "surv-legend-note";
+    n.textContent = text;
+    el.appendChild(n);
+  }
+  // A plain action button appended after a card's legend chips.
+  function legendButton(cardId, label, onClick) {
+    var el = legendEl(cardId);
+    if (!el) return;
+    var b = document.createElement("button");
+    b.type = "button";
+    b.className = "surv-chip surv-chip-action";
+    b.textContent = label;
+    b.addEventListener("click", onClick);
+    el.appendChild(b);
+  }
 
   // Map a hovered day onto the week (Monday ISO) containing it.
   function weekIndex(weeks, day) {
@@ -761,9 +781,57 @@
       { label: trf("ui.surv.backfill_legend_thr", "{pct}% complete", { pct: Math.round(100 * thr) }), color: ALERT, dashed: true },
       { label: tr("ui.surv.backfill_legend_window", "Shaded window on onset-date charts"), color: SHADE, bar: true }
     ]);
+    legendNote("surv-backfill", tr("ui.surv.backfill_over100",
+      "Values above 100% happen when an earlier export held more cases for those onset dates than the latest one does, e.g. cases later reclassified as not cases, removed as duplicates, or moved to another onset date or area."));
     caption("surv-backfill", trf("ui.surv.backfill_caption",
       "{place}: based on {n} confirmed cases. About {pct}% of cases are in the line list {days} days after onset, so the last {days} days are shaded on this area's onset-date charts.",
       { place: bfLabel(bfScope, e), n: num(e.reference_cases), pct: Math.round(100 * thr), days: e.days }));
+  }
+
+  // --- Epi curve in successive exports (right of the completeness curve) -----------------
+  // Older exports lighter, the latest darkest.
+  var EXPORT_PAL = ["#b9d7da", "#94c2c7", "#6eacb3", "#4a959f", "#2a7d89", "#145f6b", "#01454f"];
+  function renderBackfillCurve() {
+    var b = backfill(), ec = b && b.epicurves, curves = ec && ec.curves && ec.curves[bfScope];
+    var h = host("surv-backfill-curve-chart");
+    if (!h) return;
+    if (!curves || !ec.exports.length) {
+      empty("surv-backfill-curve-chart"); caption("surv-backfill-curve", "");
+      if (legendEl("surv-backfill-curve")) legendEl("surv-backfill-curve").replaceChildren();
+      return;
+    }
+    var n = ec.exports.length, pal = EXPORT_PAL.slice(EXPORT_PAL.length - n);
+    var dayAt = function (i) { return addDays(ec.start, i); };
+    var last = ec.exports[n - 1];
+    var yMax = Math.max(1, maxOf([].concat.apply([], curves)));
+    var s = newSvg(h);
+    var fr = C.frame(s.svg, { width: s.W, height: s.H, pad: PAD_NOSEC, xStart: ec.start, xEnd: last, yMax: yMax });
+    ec.exports.forEach(function (e, j) {
+      var x = fr.xToPx(C.dayMs(e));
+      s.svg.appendChild(C.svgEl("line", { x1: x, x2: x, y1: fr.top, y2: fr.baseY,
+        stroke: pal[j], "stroke-width": 1, "stroke-dasharray": "2,3" }));
+    });
+    curves.forEach(function (vals, j) {
+      C.line(s.svg, fr, vals.map(function (_, i) { return dayAt(i); }), vals, pal[j], j === n - 1 ? 2 : 1.4);
+    });
+    h.appendChild(s.svg);
+    C.tooltip(h, s.svg, fr, function (day) {
+      var i = Math.round((C.dayMs(day) - C.dayMs(ec.start)) / DAY);
+      var rows = curves.map(function (vals, j) {
+        var v = vals[i];
+        if (v == null) return "";
+        return '<div><span class="dc-sw" style="background:' + pal[j] + '"></span>' +
+          esc(trf("ui.surv.epicurve_export", "Export {date}", { date: fmtDay(ec.exports[j]) })) + ": " + v + "</div>";
+      }).reverse().join("");
+      return rows ? '<div class="dc-tip-d">' + esc(fmtDay(day)) + "</div>" + rows : null;
+    });
+    staticLegend("surv-backfill-curve", ec.exports.map(function (e, j) {
+      return { label: trf("ui.surv.epicurve_export", "Export {date}", { date: fmtDay(e) }), color: pal[j] };
+    }));
+    var e0 = (b.locations || {})[bfScope];
+    caption("surv-backfill-curve", trf("ui.surv.epicurve_caption",
+      "{place}: confirmed cases per day by onset date (7-day average) in each export. Each curve drops off before its export date (dotted line) and fills in later; that drop is late reporting, not a real decline.",
+      { place: bfLabel(bfScope, e0) }));
   }
 
   // --- Laboratory turnaround time -------------------------------------------------------
@@ -797,6 +865,13 @@
       toggleLegend("surv-tat", labs.map(function (l, i) {
         return { id: l.code, label: l.label || l.code, color: col(i), on: !!tatOn[l.code] };
       }), function (id) { tatOn[id] = !tatOn[id]; renderTat(); });
+      // One button: "Deselect all" while anything is shown, else "Select all".
+      var anyOn = labs.some(function (l) { return tatOn[l.code]; });
+      legendButton("surv-tat", anyOn ? tr("ui.surv.deselect_all", "Deselect all") : tr("ui.surv.select_all", "Select all"),
+        function () {
+          labs.forEach(function (l) { tatOn[l.code] = !anyOn; });
+          renderTat();
+        });
     };
     if (!shown.length) {
       empty("surv-tat-chart", tr("ui.surv.tat_none_selected", "Select a laboratory in the legend."));
@@ -864,7 +939,7 @@
   function renderAll() {
     if (!data()) {
       ["surv-ct-source", "surv-fu-visits", "surv-fu21", "surv-journey", "surv-delays",
-       "surv-backfill", "surv-tests", "surv-labs", "surv-tat"].forEach(function (id) { empty(id + "-chart"); });
+       "surv-backfill", "surv-backfill-curve", "surv-tests", "surv-labs", "surv-tat"].forEach(function (id) { empty(id + "-chart"); });
       renderProvinceTable();
       return;
     }
@@ -878,6 +953,7 @@
     renderDelays();
     fillBackfillScope();
     renderBackfill();
+    renderBackfillCurve();
     fillTestScope();
     renderTests();
     renderLabs();
@@ -885,13 +961,45 @@
     renderProvinceTable();
   }
 
+  // Left section menu: click scrolls #surv-page (the scroll container, not the
+  // window) to the section; the link for the section in view is highlighted.
+  function wireNav() {
+    var page = host("surv-page");
+    var links = Array.prototype.slice.call(document.querySelectorAll ? document.querySelectorAll(".surv-nav-link") : []);
+    if (!page || !links.length) return;
+    links.forEach(function (a) {
+      a.addEventListener("click", function () {
+        var t = host(a.getAttribute("data-target"));
+        if (t && t.scrollIntoView) t.scrollIntoView({ behavior: "smooth", block: "start" });
+      });
+    });
+    var mark = function () {
+      var top = page.getBoundingClientRect().top + 60, current = links[0];
+      // At the very bottom the last (short) section can't reach the top: pick it.
+      var atEnd = page.scrollTop + page.clientHeight >= page.scrollHeight - 4;
+      links.forEach(function (a) {
+        var t = host(a.getAttribute("data-target"));
+        if (t && t.getBoundingClientRect().top <= top) current = a;
+      });
+      if (atEnd) current = links[links.length - 1];
+      links.forEach(function (a) { a.classList.toggle("active", a === current); });
+    };
+    var raf = null;
+    page.addEventListener("scroll", function () {
+      if (raf) return;
+      raf = (global.requestAnimationFrame || global.setTimeout)(function () { raf = null; mark(); });
+    });
+    mark();
+  }
+
   function wire() {
+    wireNav();
     var sel = host("surv-ct-scope");
     if (sel) sel.addEventListener("change", function () { ctScope = sel.value || "national"; renderSource(); });
     var ts = host("surv-test-scope");
     if (ts) ts.addEventListener("change", function () { testScope = ts.value || "national"; renderTests(); });
     var bs = host("surv-backfill-scope");
-    if (bs) bs.addEventListener("change", function () { bfScope = bs.value || "national"; renderBackfill(); });
+    if (bs) bs.addEventListener("change", function () { bfScope = bs.value || "national"; renderBackfill(); renderBackfillCurve(); });
     var add = host("surv-fu21-add");
     if (add) add.addEventListener("change", function () {
       if (add.value && fuShown.indexOf(add.value) < 0) fuShown.push(add.value);

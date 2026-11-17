@@ -16,6 +16,7 @@ from datetime import datetime, timezone
 
 from common.data_sources import *  # noqa: F401,F403 -- re-export all loaders/constants
 from common.surveillance import load_surveillance
+from common.clinical import load_clinical
 from common.snapshot_summary import build_snapshot_summary
 from common.rt import load_rt_estimates
 from common.paths import (
@@ -126,7 +127,9 @@ def build_shared_payload() -> dict:
                   "(per-location, from reporting_backfill/incomplete_windows.json)")
     rt = load_rt_estimates()
     surveillance = load_surveillance()
-    surveillance = load_surveillance()
+    clinical = load_clinical()
+    if clinical:
+        print(f"  clinical: {clinical['asof']}, {len(clinical['locations'])} locations")
     if surveillance:
         ct = surveillance.get("contact_tracing") or {}
         te = surveillance.get("testing") or {}
@@ -239,6 +242,7 @@ def build_shared_payload() -> dict:
         "province_boundaries": province_boundaries,
         "trends": trends,
         "surveillance": surveillance,
+        "clinical": clinical,
         "rt": rt,
         "invasion_risk": invasion_risk,
         "import_force_pairwise": import_force_pairwise,

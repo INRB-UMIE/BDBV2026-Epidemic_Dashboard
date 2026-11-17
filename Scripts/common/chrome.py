@@ -30,19 +30,25 @@ NAV_ITEMS = [
     ("genomic-epidemiology", "ui.view_genomic_epidemiology", "Genomic Epidemiology"),
 ]
 
+# Views still built (output/<page>.html works if opened directly) but left out
+# of the tab bar. "context" (Public Health Context) is hidden while its
+# content is out of date; the Current Snapshot keeps its own context card.
+# Remove an id from this set to bring its tab back.
+HIDDEN_VIEWS = {"context"}
+
 # Views with no real content yet -- just a "coming soon" stub panel (see
 # #stub-<id> in BODY_TEMPLATE). They still get the full shared header/tabs/
 # footer chrome and the full map engine + payload underneath (hidden via the
 # "stub-view" body class below), matching every other page for now; see the
 # README "Multi-page structure" section for why that engine/payload sharing
 # exists and the trade-off it implies.
-STUB_VIEWS = {"clinical-symptoms"}
+STUB_VIEWS: set[str] = set()
 
 # Real pages that do not use the map: the Leaflet map, its panels and the
 # zone search are hidden (body class "mapless-view") and the page's own
 # full-width content (page_body) fills the area instead. The engine and the
 # shared payload still load underneath, as on every page.
-MAPLESS_VIEWS = {"surveillance-testing"}
+MAPLESS_VIEWS = {"surveillance-testing", "clinical-symptoms"}
 
 HEAD_TEMPLATE = r"""<!doctype html>
 <html lang="en">
@@ -391,7 +397,7 @@ __NAV_LINKS__
     </div>
     <div id="trends-rt" class="panel trends-plot-card">
       <div class="panel-header">
-        <strong id="trends-rt-title" data-i18n="ui.trends_rt_panel">Reproduction Number (Rt)</strong>
+        <strong id="trends-rt-title" data-i18n="ui.trends_rt_panel">Reproduction Number (<span class="keep-case">Rt</span>)</strong>
         <button class="panel-toggle" data-target="trends-rt" type="button"
                 data-i18n-aria="ui.aria.toggle_trends" data-i18n-title="ui.aria.collapse_trends"
                 aria-label="Toggle reproduction number panel" title="Collapse / expand reproduction number">−</button>
@@ -465,6 +471,10 @@ def _render_nav(active_view: str, assets_prefix: str) -> str:
     """
     links = []
     for view_id, i18n_key, label in NAV_ITEMS:
+        # A hidden view keeps its tab only on its own page, so the bar still
+        # shows where you are if the page is opened directly.
+        if view_id in HIDDEN_VIEWS and view_id != active_view:
+            continue
         # Pages live alongside each other (all in output/ or all at repo
         # root), so a bare relative filename is correct in both contexts.
         # assets_prefix is unused here; it only applies to the assets/ subfolder.
@@ -488,6 +498,8 @@ _PAGE_SCOPED_PAYLOAD_KEYS = {
     "trends": {"trends"},
     # Contact tracing + testing series; only the Surveillance and Testing tab.
     "surveillance": {"surveillance-testing"},
+    # Clinical summary tables (common/clinical.py); only the Clinical Symptoms tab.
+    "clinical": {"clinical-symptoms"},
     # Digest of trends/surveillance/genomic for the Snapshot summary rail.
     "snapshot_summary": {"map"},
     # Rt time series (common/rt.py): Trends card + Snapshot summary card.

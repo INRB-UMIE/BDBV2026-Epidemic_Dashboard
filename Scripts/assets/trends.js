@@ -49,6 +49,17 @@
     return (v && v !== key) ? v : fallback;
   }
 
+  // Panel titles are uppercased by the theme CSS (.panel-header strong);
+  // "Rt" must keep its case ("RT" reads as something else), so it is
+  // wrapped in a span that opts out (.keep-case in dashboard.css).
+  function escHtml(s) {
+    return String(s == null ? "" : s).replace(/&/g, "&amp;").replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+  }
+  function keepCase(html) {
+    return html.replace(/\bRt\b/g, '<span class="keep-case">Rt</span>');
+  }
+
   // Resolve one family's entry for the current selection.
   function pick(family, scope, key) {
     var d = trends();
@@ -365,7 +376,7 @@
     if (cardEl) cardEl.style.display = available ? "" : "none";
     if (!available) return;
     var base = tr("ui.trends_rt_panel", "Reproduction Number (Rt)");
-    if (titleEl) titleEl.textContent = place ? base + " - " + place : base;
+    if (titleEl) titleEl.innerHTML = keepCase(escHtml(place ? base + " - " + place : base));
     if (scope !== "national" && !key) {
       body.className = "panel-body trends-empty";
       body.innerHTML = "<p>" + (global.trendsEmptyMessage ? global.trendsEmptyMessage()
