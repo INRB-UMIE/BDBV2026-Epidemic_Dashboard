@@ -430,7 +430,6 @@ ui:
     ct_contacts: "Contacts listés"
     ct_fu: "Contacts suivis jusqu'au bout (21 jours)"
     ct_fu_n: "Suivis jusqu'au bout / contacts éligibles"
-    ct_known: "Nouveaux cas déjà connus comme contacts"
     ct_source: "Cas devenus cas sources"
     ct_med: "Médiane de contacts par cas source"
     ct_province: "Province de {province}"

@@ -430,7 +430,6 @@ ui:
     ct_contacts: "Contacts listed"
     ct_fu: "Contacts fully followed up (21 days)"
     ct_fu_n: "Fully followed up / eligible contacts"
-    ct_known: "New cases already known as contacts"
     ct_source: "Cases that became source cases"
     ct_med: "Median contacts per source case"
     ct_province: "{province} province"

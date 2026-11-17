@@ -279,7 +279,6 @@
       body += rows([
         [tr("ct_contacts"), num(hl.contacts)],
         [tr("ct_fu_n"), num(hl.fu_complete) + " / " + num(hl.fu_contacts)],
-        [tr("ct_known"), pctv(hl.prev_contact_pct, 1)],
         [tr("ct_source"), pctv(nat.pct_cases_source, 1)],
         [tr("ct_med"), num(nat.med_contacts)]
       ]);
@@ -293,7 +292,6 @@
         body += '<div class="snap-bar"><span style="width:' + zfu + '%"></span></div>';
         var r = [[tr("ct_fu_n"), num(zc.fu_k) + " / " + num(zc.fu_n)]];
         if (zc.cases) {
-          r.push([tr("ct_known"), pct(zc.prev_contact, zc.cases)]);
           r.push([tr("ct_source"), pct(zc.became_source, zc.cases)]);
         }
         body += rows(r);
@@ -308,7 +306,6 @@
         body += rows([
           [tr("ct_contacts"), num(pr.contacts)],
           [tr("ct_fu"), pctv(pr.pct_fu_complete, 1)],
-          [tr("ct_known"), pctv(pr.pct_cases_prev_contact, 1)],
           [tr("ct_source"), pctv(pr.pct_cases_source, 1)]
         ]);
       }
