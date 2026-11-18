@@ -141,17 +141,6 @@
     n.textContent = text;
     el.appendChild(n);
   }
-  // A plain action button appended after a card's legend chips.
-  function legendButton(cardId, label, onClick) {
-    var el = legendEl(cardId);
-    if (!el) return;
-    var b = document.createElement("button");
-    b.type = "button";
-    b.className = "surv-chip surv-chip-action";
-    b.textContent = label;
-    b.addEventListener("click", onClick);
-    el.appendChild(b);
-  }
 
   // Map a hovered day onto the week (Monday ISO) containing it.
   function weekIndex(weeks, day) {
@@ -834,80 +823,6 @@
       { place: bfLabel(bfScope, e0) }));
   }
 
-  // --- Laboratory turnaround time -------------------------------------------------------
-  // Default: the 6 busiest labs shown, the rest toggled on from the legend.
-  var TAT_TOP = 6, tatOn = null;
-  function renderTat() {
-    var te = testing(), tat = (te && te.turnaround) || {};
-    var labs = ((te && te.labs) || []).filter(function (l) { return tat[l.code] && tat[l.code].dates.length; });
-    // Labs only in the turnaround file (none today) still get a line.
-    Object.keys(tat).forEach(function (code) {
-      if (!labs.some(function (l) { return l.code === code; }) && tat[code].dates.length) labs.push({ code: code, label: code });
-    });
-    if (!labs.length) {
-      empty("surv-tat-chart"); caption("surv-tat", "");
-      if (legendEl("surv-tat")) legendEl("surv-tat").replaceChildren();
-      return;
-    }
-    if (!tatOn) {
-      tatOn = {};
-      labs.forEach(function (l, i) { tatOn[l.code] = i < TAT_TOP; });
-    }
-    var col = function (i) { return ZONE_PAL[i % ZONE_PAL.length]; };
-    var shown = labs.map(function (l, i) { return { l: l, color: col(i) }; }).filter(function (x) { return tatOn[x.l.code]; });
-    var lo = null, hi = null;
-    shown.forEach(function (x) {
-      var d = tat[x.l.code].dates;
-      if (lo == null || d[0] < lo) lo = d[0];
-      if (hi == null || d[d.length - 1] > hi) hi = d[d.length - 1];
-    });
-    var legend = function () {
-      toggleLegend("surv-tat", labs.map(function (l, i) {
-        return { id: l.code, label: l.label || l.code, color: col(i), on: !!tatOn[l.code] };
-      }), function (id) { tatOn[id] = !tatOn[id]; renderTat(); });
-      // One button: "Deselect all" while anything is shown, else "Select all".
-      var anyOn = labs.some(function (l) { return tatOn[l.code]; });
-      legendButton("surv-tat", anyOn ? tr("ui.surv.deselect_all", "Deselect all") : tr("ui.surv.select_all", "Select all"),
-        function () {
-          labs.forEach(function (l) { tatOn[l.code] = !anyOn; });
-          renderTat();
-        });
-    };
-    if (!shown.length) {
-      empty("surv-tat-chart", tr("ui.surv.tat_none_selected", "Select a laboratory in the legend."));
-      legend(); caption("surv-tat", ""); return;
-    }
-    // Axis capped near the 98th percentile (at least 7 days): one lab's
-    // 36-day spike would otherwise flatten everyone's usual 0-2 days. Marks
-    // are clipped at the top; the tooltip still gives the real value.
-    var vals = [].concat.apply([], shown.map(function (x) { return tat[x.l.code].median; }))
-      .filter(function (v) { return v != null; }).sort(function (a, b) { return a - b; });
-    var peak = vals.length ? vals[vals.length - 1] : 0;
-    var cap = Math.max(7, Math.ceil(vals.length ? vals[Math.floor(0.98 * (vals.length - 1))] : 0));
-    var yMax = Math.min(peak, cap) || 1, capped = peak > cap;
-    lineChart("surv-tat-chart", {
-      xs: [lo, hi], xStart: lo, xEnd: hi,
-      yMax: Math.max(yMax, 2),
-      series: shown.map(function (x) {
-        return { id: x.l.code, xs: tat[x.l.code].dates, values: tat[x.l.code].median, color: x.color, width: 1.4, noPoints: true };
-      }),
-      tip: function (day) {
-        var rows = shown.map(function (x) {
-          var t = tat[x.l.code], i = t.dates.indexOf(day);
-          if (i < 0 || t.median[i] == null) return "";
-          return '<div><span class="dc-sw" style="background:' + x.color + '"></span>' + esc(x.l.label || x.l.code) + ": " +
-            t.median[i] + ' <span class="dc-tip-ci">(IQR ' + t.q25[i] + "–" + t.q75[i] + ", n=" + num(t.n[i]) + ")</span></div>";
-        }).join("");
-        return rows ? '<div class="dc-tip-d">' + esc(fmtDay(day)) + "</div>" + rows : null;
-      }
-    });
-    legend();
-    caption("surv-tat", tr("ui.surv.tat_caption",
-      "Median days from sample collection to analysis, over the previous 5 days of analyses, by date of analysis.") +
-      (capped ? " " + trf("ui.surv.tat_capped", "Axis cut at {cap} days (highest value {max}); hover for values above it.",
-        { cap: cap, max: peak }) : ""));
-  }
-
   // --- Province indicators table ----------------------------------------------------------
   function renderProvinceTable() {
     var el = host("surv-province-table"), c = ct();
@@ -939,7 +854,7 @@
   function renderAll() {
     if (!data()) {
       ["surv-ct-source", "surv-fu-visits", "surv-fu21", "surv-journey", "surv-delays",
-       "surv-backfill", "surv-backfill-curve", "surv-tests", "surv-labs", "surv-tat"].forEach(function (id) { empty(id + "-chart"); });
+       "surv-backfill", "surv-backfill-curve", "surv-tests", "surv-labs"].forEach(function (id) { empty(id + "-chart"); });
       renderProvinceTable();
       return;
     }
@@ -957,7 +872,6 @@
     fillTestScope();
     renderTests();
     renderLabs();
-    renderTat();
     renderProvinceTable();
   }
 
