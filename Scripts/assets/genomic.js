@@ -1337,11 +1337,70 @@
     });
   }
 
+  // Drag the bar under the phylogeny to change the tree's height, like the rail's
+  // width. Session-only, as for the width. The rail scrolls, so the tree may grow
+  // taller than the window (up to 3x its height). Double-click resets.
+  var TREE_MIN_H = 220, TREE_DEFAULT_H = 360;
+  function treeMaxH() { return Math.max(TREE_DEFAULT_H, Math.round(window.innerHeight * 3)); }
+  function initTreeResize() {
+    var wrap = document.querySelector("#genomic-panel .gen-tree-wrap");
+    var handle = document.getElementById("gen-tree-resize");
+    if (!wrap || !handle) return;
+    function setH(px) {
+      px = Math.max(TREE_MIN_H, Math.min(treeMaxH(), Math.round(px)));
+      wrap.style.height = px + "px";
+      // Same nudge as applyWidth(): PearTree only refits on a window resize.
+      window.dispatchEvent(new Event("resize"));
+    }
+    var dragging = false, startY = 0, startH = 0;
+    function onMove(e) {
+      if (!dragging) return;
+      setH(startH + (e.clientY - startY));
+      e.preventDefault();
+    }
+    function onUp() {
+      if (!dragging) return;
+      dragging = false;
+      document.body.classList.remove("genomic-tree-resizing");
+      window.removeEventListener("mousemove", onMove);
+      window.removeEventListener("mouseup", onUp);
+    }
+    handle.addEventListener("mousedown", function (e) {
+      dragging = true;
+      startY = e.clientY;
+      startH = wrap.getBoundingClientRect().height;
+      document.body.classList.add("genomic-tree-resizing");
+      window.addEventListener("mousemove", onMove);
+      window.addEventListener("mouseup", onUp);
+      e.preventDefault();
+    });
+    // Touch: same drag with one finger.
+    handle.addEventListener("touchstart", function (e) {
+      if (e.touches.length !== 1) return;
+      startY = e.touches[0].clientY;
+      startH = wrap.getBoundingClientRect().height;
+      e.preventDefault();
+    }, { passive: false });
+    handle.addEventListener("touchmove", function (e) {
+      if (e.touches.length !== 1) return;
+      setH(startH + (e.touches[0].clientY - startY));
+      e.preventDefault();
+    }, { passive: false });
+    handle.addEventListener("dblclick", function () { setH(TREE_DEFAULT_H); });
+    // Keyboard resize for accessibility (± 40px on arrow keys).
+    handle.addEventListener("keydown", function (e) {
+      var cur = wrap.getBoundingClientRect().height;
+      if (e.key === "ArrowDown") { setH(cur + 40); e.preventDefault(); }
+      else if (e.key === "ArrowUp") { setH(cur - 40); e.preventDefault(); }
+    });
+  }
+
   function boot() {
     if (document.body.getAttribute("data-initial-view") !== "genomic-epidemiology") return;
     var tab = createGenomicTab({ data: readGenomic() });
     tab.mount();
     initResize();
+    initTreeResize();
     window.__genomicTab = tab;   // exposed for later engine/coordinator integration
   }
 

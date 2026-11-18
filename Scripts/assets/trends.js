@@ -27,6 +27,8 @@
   var COLOR_SAMPLES = "#9c968b";
   var COLOR_INCOMPLETE = "#9c968b";
   var COLOR_INK = "#2a2a27";
+  var COLOR_RT = "#6a4c93";
+  var COLOR_RT_BAND = "rgba(106,76,147,0.16)";
   var PAD = { left: 42, right: 46, top: 12, bottom: 26 };
 
   function readTrends() {
@@ -45,6 +47,17 @@
     if (!global.t) return fallback;
     var v = global.t(key);
     return (v && v !== key) ? v : fallback;
+  }
+
+  // Panel titles are uppercased by the theme CSS (.panel-header strong);
+  // "Rt" must keep its case ("RT" reads as something else), so it is
+  // wrapped in a span that opts out (.keep-case in dashboard.css).
+  function escHtml(s) {
+    return String(s == null ? "" : s).replace(/&/g, "&amp;").replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+  }
+  function keepCase(html) {
+    return html.replace(/\bRt\b/g, '<span class="keep-case">Rt</span>');
   }
 
   // Resolve one family's entry for the current selection.
@@ -84,14 +97,14 @@
     return name ? (d.x_limits[scale] || {})[name] || null : null;
   }
 
-  // Per-location incomplete-reporting window for the CASES card only
-  // (PAYLOAD.trends.cases_incomplete, from Processing_Code step 6's
-  // reporting_backfill/incomplete_windows.json): {days, from, source}.
+  // Per-location incomplete-reporting window (PAYLOAD.trends.cases_incomplete,
+  // from Processing_Code step 6's reporting_backfill/incomplete_windows.json):
+  // {days, from, source}. Estimated from confirmed-case completeness by days
+  // since onset, and used for EVERY onset-date card: cases, positivity, and
+  // deaths (once step 3 writes deaths by onset; see deathsByOnset()).
   // Health areas use their zone's window; anything missing falls back to
-  // national. Null when the payload has none -- the card then uses the global
-  // incomplete_from like the other cards. The deaths/positivity/lab cards are
-  // on other date axes (reporting/analysis date) with their own delays, so
-  // they keep the global window.
+  // national. Null when the payload has none -- cards then use the global
+  // incomplete_from. Lab charts (analysis date) are not shaded at all.
   function casesIncomplete(scope, key) {
     var d = trends(), w = d && d.cases_incomplete;
     if (!w) return null;
@@ -105,6 +118,12 @@
     // Falling back: say so, so the caption doesn't present national's own
     // estimate as this location's.
     return nat ? { days: nat.days, from: nat.from, source: "national" } : null;
+  }
+
+  // True when cumulative_positive_deaths.csv is by onset date. Older
+  // snapshots are by reporting date, where an onset window would be wrong.
+  function deathsByOnset() {
+    return ((trends() || {}).deaths_date_axis) === "onset";
   }
 
   function casesIncompleteFrom(scope, key) {
@@ -208,7 +227,8 @@
       width: dim.W, height: dim.H, pad: PAD,
       xStart: lim.start, xEnd: lim.end, yMax: yMax
     });
-    C.shadeRegion(svg, fr, d.incomplete_from, COLOR_INCOMPLETE);
+    C.shadeRegion(svg, fr, deathsByOnset() ? casesIncompleteFrom(scope, key) : d.incomplete_from,
+      COLOR_INCOMPLETE);
     C.line(svg, fr, dates, entry.cum, COLOR_DEATHS, 1.6);
     // Points ONLY on days with a death reported -- a point every day would
     // imply an event on days where none occurred.
@@ -250,7 +270,7 @@
       width: dim.W, height: dim.H, pad: PAD,
       xStart: lim.start, xEnd: lim.end, yMax: yMax   // lower bound pinned at 0
     });
-    C.shadeRegion(svg, fr, d.incomplete_from, COLOR_INCOMPLETE);
+    C.shadeRegion(svg, fr, casesIncompleteFrom(scope, key), COLOR_INCOMPLETE);
     // The band's alpha lives in COLOR_POSITIVITY_BAND itself; ciBand sets no
     // opacity of its own, matching genomic.js's Ne band.
     C.ciBand(svg, fr, dates, lo, hi, COLOR_POSITIVITY_BAND);
@@ -266,6 +286,122 @@
         ' <span class="dc-tip-ci">(' + lo[i].toFixed(1) + "–" + hi[i].toFixed(1) + "%)</span></div>";
     });
     return true;
+  }
+
+  // --- Card 4: reproduction number (Rt) -------------------------------------
+  // PAYLOAD.rt (common/rt.py) holds one series per estimated location, grouped
+  // by spatial level. The card is shown ONLY for scopes whose level has
+  // estimates: today national + provinces, so it is hidden at Health Zone and
+  // Health Area scope. Adding zone or area rows to the Rt CSV switches it on
+  // there with no code change. A province-level estimate is never shown for a
+  // zone.
+  var RT_LEVEL_OF_SCOPE = {
+    national: "national", province: "provinces",
+    health_zone: "health_zones", health_area: "health_areas"
+  };
+  function rtData() {
+    return (typeof PAYLOAD !== "undefined" && PAYLOAD && PAYLOAD.rt) || null;
+  }
+  // True when this scope's spatial level has at least one Rt series.
+  function rtLevelAvailable(scope) {
+    var rt = rtData(), level = RT_LEVEL_OF_SCOPE[scope];
+    if (!rt || !level) return false;
+    if (level === "national") return !!(rt.national && rt.national.dates && rt.national.dates.length);
+    return Object.keys(rt[level] || {}).length > 0;
+  }
+  // The selected location's own series, or null.
+  function rtFor(scope, key) {
+    var rt = rtData();
+    if (!rtLevelAvailable(scope)) return null;
+    if (scope === "national") return rt.national;
+    return (key && (rt[RT_LEVEL_OF_SCOPE[scope]] || {})[key]) || null;
+  }
+
+  function renderRt(host, scope, key, lim) {
+    var e = rtFor(scope, key);
+    if (!e || !e.dates.length) return false;
+    var dates = e.dates;
+    var dim = size(host), svg = newSvg(host, dim.W, dim.H);
+    // Time axis: the selection's shared range, stretched to cover the Rt
+    // series where it runs past it (Rt can be estimated beyond the line-list
+    // cut used for x_limits).
+    var xStart = lim ? lim.start : dates[0];
+    var xEnd = lim && lim.end > dates[dates.length - 1] ? lim.end : dates[dates.length - 1];
+    if (dates[0] < xStart) xStart = dates[0];
+    var finite = e.hi.filter(function (v) { return v !== null && v !== undefined; });
+    var yMax = Math.max(2, Math.max.apply(null, finite.concat([0])));
+
+    var fr = C.frame(svg, {
+      width: dim.W, height: dim.H, pad: PAD,
+      xStart: xStart, xEnd: xEnd, yMax: yMax, allowFractional: true,
+      fmtY: function (v) { return String(Math.round(v * 10) / 10); }
+    });
+    // Rt = 1 threshold: above it, each case causes more than one new case.
+    var y1 = fr.yToPx(1);
+    svg.appendChild(C.svgEl("line", {
+      x1: fr.left, x2: fr.right, y1: y1, y2: y1,
+      stroke: COLOR_INK, "stroke-width": 1, "stroke-dasharray": "4,3", opacity: 0.55
+    }));
+    C.ciBand(svg, fr, dates, e.lo, e.hi, COLOR_RT_BAND);
+    C.line(svg, fr, dates, e.mean, COLOR_RT, 1.6);
+    host.appendChild(svg);
+
+    C.tooltip(host, svg, fr, function (iso) {
+      var i = dates.indexOf(iso);
+      if (i < 0 || e.mean[i] == null) return null;
+      return '<div class="dc-tip-d">' + C.fmtDay(C.dayMs(iso)) + "</div>" +
+        "<div>Rt " + e.mean[i].toFixed(2) +
+        ' <span class="dc-tip-ci">(' + (e.lo[i] != null ? e.lo[i].toFixed(2) : "–") + "–" +
+        (e.hi[i] != null ? e.hi[i].toFixed(2) : "–") + ")</span></div>";
+    });
+    return true;
+  }
+
+  function longDay(iso) {
+    if (!iso) return "";
+    var fr = global.localeTag && global.localeTag() === "fr-FR";
+    return new Date(C.dayMs(iso)).toLocaleDateString(fr ? "fr-FR" : "en-GB",
+      { day: "numeric", month: "short", year: "numeric", timeZone: "UTC" });
+  }
+
+  function renderRtCard(scope, key, place) {
+    var cardEl = document.getElementById("trends-rt");
+    var titleEl = document.getElementById("trends-rt-title");
+    var body = document.getElementById("trends-rt-body");
+    if (!body) return;
+    body.replaceChildren();
+    // No estimates at this spatial level: hide the card outright rather than
+    // showing an empty state on every selection.
+    var available = rtLevelAvailable(scope);
+    if (cardEl) cardEl.style.display = available ? "" : "none";
+    if (!available) return;
+    var base = tr("ui.trends_rt_panel", "Reproduction Number (Rt)");
+    if (titleEl) titleEl.innerHTML = keepCase(escHtml(place ? base + " - " + place : base));
+    if (scope !== "national" && !key) {
+      body.className = "panel-body trends-empty";
+      body.innerHTML = "<p>" + (global.trendsEmptyMessage ? global.trendsEmptyMessage()
+        : tr("ui.trends_no_plot", "No data available.")) + "</p>";
+      return;
+    }
+    var chart = document.createElement("div");
+    chart.className = "dc-chart";
+    body.className = "panel-body";
+    body.appendChild(chart);
+    if (renderRt(chart, scope, key, xLimits(scope, key))) {
+      var e = rtFor(scope, key), rt = rtData();
+      var text = tr("ui.trends_caption_rt",
+        "Estimated time-varying reproduction number: mean (line) and 95% interval (band). Above the dashed line (Rt = 1) the epidemic is growing.");
+      if (global.tf) text += " " + global.tf("ui.trends_rt_asof", { date: longDay(e.dates[e.dates.length - 1]), run: longDay(rt.run_date) });
+      addCaption(body, text);
+      return;
+    }
+    // Level is estimated, but not this location (e.g. a province with too
+    // few cases).
+    body.replaceChildren();
+    body.className = "panel-body trends-empty";
+    body.innerHTML = "<p>" + (global.tf
+      ? global.tf("ui.trends_rt_none_place", { place: place || key || "" })
+      : tr("ui.trends_rt_none", "No Rt estimate for this selection.")) + "</p>";
   }
 
   // Normalises a place name for cross-dataset matching (zone naming drifts
@@ -302,15 +438,8 @@
       width: dim.W, height: dim.H, pad: PAD,
       xStart: lim.start, xEnd: lim.end, yMax: maxTotal
     });
-    // Per-lab, not per-frame. Lab charts share the GLOBAL x range, so
-    // incomplete_from always falls inside the frame -- but the band asserts
-    // "these recent dates may be under-reported", which says nothing useful
-    // about a lab that has no data in that window at all. The generator tests
-    // each lab's own analysis dates (incomplete_reporting_dates(lab_df$...))
-    // and omits the band when none fall in the window; match that.
-    if (dates.length && dates[dates.length - 1] >= d.incomplete_from) {
-      C.shadeRegion(svg, fr, d.incomplete_from, COLOR_INCOMPLETE);
-    }
+    // No incomplete-reporting band: lab charts are by analysis date, and the
+    // backfill windows only describe onset-date completeness.
     C.stackedBars(svg, fr, dates, [{ values: lab.n, color: COLOR_SAMPLES }]);
 
     // Positivity scaled onto the SAME primary axis by * max_total, exactly as
@@ -425,7 +554,7 @@
         if (lastState) render(lastState);
       }, 80);
     });
-    ["trends-body", "trends-deaths-body", "trends-positivity-body", "trends-labs-body"]
+    ["trends-body", "trends-deaths-body", "trends-positivity-body", "trends-rt-body", "trends-labs-body"]
       .forEach(function (id) {
         var el = document.getElementById(id);
         if (el) ro.observe(el);
@@ -451,17 +580,23 @@
     var lim = xLimits(scope, key);
     var ci = casesIncomplete(scope, key);
     var casesBand = ci ? { from: ci.from, note: casesIncompleteNote(scope, ci) } : null;
+    var deathsOnset = deathsByOnset();
 
     card("trends-title", "trends-body", "ui.trends_panel", "Daily Cases by Symptom Onset",
       place, function (b) { return renderCases(b, scope, key); },
       "ui.trends_caption_cases", "Confirmed cases by date of symptom onset", lim, casesBand);
     card("trends-deaths-title", "trends-deaths-body", "ui.trends_deaths_panel", "Cumulative Deaths",
       place, function (b) { return renderDeaths(b, scope, key); },
-      "ui.trends_caption_deaths",
-      "Cumulative confirmed deaths by reporting date (death alerts with confirmed MVE classification)", lim);
+      deathsOnset ? "ui.trends_caption_deaths_onset" : "ui.trends_caption_deaths",
+      deathsOnset
+        ? "Cumulative confirmed deaths by date of symptom onset (death alerts with confirmed MVE classification)"
+        : "Cumulative confirmed deaths by reporting date (death alerts with confirmed MVE classification)",
+      lim, deathsOnset ? casesBand : null);
     card("trends-positivity-title", "trends-positivity-body", "ui.trends_positivity_panel", "Test Positivity",
       place, function (b) { return renderPositivity(b, scope, key); },
-      "ui.trends_caption_positivity", "5-day rolling test positivity by date of symptom onset", lim);
+      "ui.trends_caption_positivity", "5-day rolling test positivity by date of symptom onset", lim, casesBand);
+
+    renderRtCard(scope, key, place);
 
     var labCard = document.getElementById("trends-labs");
     var labBody = document.getElementById("trends-labs-body");
@@ -507,9 +642,9 @@
   global.TrendsCharts = {
     render: render,
     _renderCases: renderCases, _renderDeaths: renderDeaths,
-    _renderPositivity: renderPositivity, _renderLab: renderLab,
+    _renderPositivity: renderPositivity, _renderLab: renderLab, _rtFor: rtFor, _rtLevelAvailable: rtLevelAvailable,
     _labsForSelection: labsForSelection, _trends: trends, _xLimits: xLimits,
-    _casesIncomplete: casesIncomplete
+    _casesIncomplete: casesIncomplete, _deathsByOnset: deathsByOnset
   };
 
   // engine.js boots synchronously and calls renderTrendsPlots() during that

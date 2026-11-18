@@ -47,6 +47,7 @@ _BODY = r"""<div id="genomic-panel">
       <div class="gen-body gen-tree-body" id="gen-tree-body" data-i18n="ui.genomic.loading">Loading…</div>
       <div class="gen-tree-legend-box" id="gen-tree-legend-box" hidden></div>
     </div>
+    <div id="gen-tree-resize" class="gen-tree-resize" role="separator" aria-orientation="horizontal" data-i18n-title="ui.aria.genomic_tree_resize" data-i18n-aria="ui.aria.genomic_tree_resize" title="Drag to change the tree's height (double-click to reset)" tabindex="0"></div>
   </section>
   <section class="gen-card" id="gen-ne-card">
     <div class="gen-card-head">

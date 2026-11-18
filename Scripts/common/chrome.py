@@ -30,13 +30,25 @@ NAV_ITEMS = [
     ("genomic-epidemiology", "ui.view_genomic_epidemiology", "Genomic Epidemiology"),
 ]
 
+# Views still built (output/<page>.html works if opened directly) but left out
+# of the tab bar. "context" (Public Health Context) is hidden while its
+# content is out of date; the Current Snapshot keeps its own context card.
+# Remove an id from this set to bring its tab back.
+HIDDEN_VIEWS = {"context"}
+
 # Views with no real content yet -- just a "coming soon" stub panel (see
 # #stub-<id> in BODY_TEMPLATE). They still get the full shared header/tabs/
 # footer chrome and the full map engine + payload underneath (hidden via the
 # "stub-view" body class below), matching every other page for now; see the
 # README "Multi-page structure" section for why that engine/payload sharing
 # exists and the trade-off it implies.
-STUB_VIEWS = {"clinical-symptoms", "surveillance-testing"}
+STUB_VIEWS: set[str] = set()
+
+# Real pages that do not use the map: the Leaflet map, its panels and the
+# zone search are hidden (body class "mapless-view") and the page's own
+# full-width content (page_body) fills the area instead. The engine and the
+# shared payload still load underneath, as on every page.
+MAPLESS_VIEWS = {"surveillance-testing", "clinical-symptoms"}
 
 HEAD_TEMPLATE = r"""<!doctype html>
 <html lang="en">
@@ -61,6 +73,15 @@ __EXTRA_HEAD__
       if (isFinite(n)) {
         n = Math.max(28, Math.min(72, n));
         document.documentElement.style.setProperty("--trends-panel-width", n + "%");
+      }
+    }
+    // Same for the Current Snapshot map/summary split (snapshot.js).
+    var s = localStorage.getItem("bdbv_snapshot_panel_width_pct");
+    if (s !== null && s !== "") {
+      var m = parseFloat(s);
+      if (isFinite(m)) {
+        m = Math.max(30, Math.min(75, m));
+        document.documentElement.style.setProperty("--snapshot-panel-width", m + "%");
       }
     }
   } catch (e) {}
@@ -374,6 +395,15 @@ __NAV_LINKS__
       </div>
       <div id="trends-positivity-body" class="panel-body trends-empty"></div>
     </div>
+    <div id="trends-rt" class="panel trends-plot-card">
+      <div class="panel-header">
+        <strong id="trends-rt-title" data-i18n="ui.trends_rt_panel">Reproduction Number (<span class="keep-case">Rt</span>)</strong>
+        <button class="panel-toggle" data-target="trends-rt" type="button"
+                data-i18n-aria="ui.aria.toggle_trends" data-i18n-title="ui.aria.collapse_trends"
+                aria-label="Toggle reproduction number panel" title="Collapse / expand reproduction number">−</button>
+      </div>
+      <div id="trends-rt-body" class="panel-body trends-empty"></div>
+    </div>
     <div id="trends-labs" class="panel trends-plot-card" style="display:none">
       <div class="panel-header">
         <strong id="trends-labs-title" data-i18n="ui.trends_labs_panel">Laboratory testing</strong>
@@ -406,10 +436,6 @@ __NAV_LINKS__
 </div>
 <div id="stub-clinical-symptoms" class="panel stub-panel">
   <h2 data-i18n="ui.view_clinical_symptoms">Clinical Symptoms</h2>
-  <p data-i18n="ui.stub_coming_soon">Coming soon.</p>
-</div>
-<div id="stub-surveillance-testing" class="panel stub-panel">
-  <h2 data-i18n="ui.view_surveillance_testing">Surveillance and Testing</h2>
   <p data-i18n="ui.stub_coming_soon">Coming soon.</p>
 </div>
 __PAGE_BODY__
@@ -445,6 +471,10 @@ def _render_nav(active_view: str, assets_prefix: str) -> str:
     """
     links = []
     for view_id, i18n_key, label in NAV_ITEMS:
+        # A hidden view keeps its tab only on its own page, so the bar still
+        # shows where you are if the page is opened directly.
+        if view_id in HIDDEN_VIEWS and view_id != active_view:
+            continue
         # Pages live alongside each other (all in output/ or all at repo
         # root), so a bare relative filename is correct in both contexts.
         # assets_prefix is unused here; it only applies to the assets/ subfolder.
@@ -466,6 +496,14 @@ _PAGE_SCOPED_PAYLOAD_KEYS = {
     # ~373 KB of series data only the Trends tab reads. Its SVG predecessor
     # (onset_trends) was unscoped and cost every page 5.35 MB.
     "trends": {"trends"},
+    # Contact tracing + testing series; only the Surveillance and Testing tab.
+    "surveillance": {"surveillance-testing"},
+    # Clinical summary tables (common/clinical.py); only the Clinical Symptoms tab.
+    "clinical": {"clinical-symptoms"},
+    # Digest of trends/surveillance/genomic for the Snapshot summary rail.
+    "snapshot_summary": {"map"},
+    # Rt time series (common/rt.py): Trends card + Snapshot summary card.
+    "rt": {"trends", "map"},
 }
 
 
@@ -498,7 +536,9 @@ def render_page(view_id: str, payload: dict, assets_prefix: str = "assets/",
     head = head.replace("__ASSETS_PREFIX__", assets_prefix)
 
     body = BODY_TEMPLATE.replace("__INITIAL_VIEW__", view_id)
-    body = body.replace("__EXTRA_BODY_CLASS__", "stub-view" if view_id in STUB_VIEWS else "")
+    body = body.replace("__EXTRA_BODY_CLASS__",
+                        "stub-view" if view_id in STUB_VIEWS
+                        else "mapless-view" if view_id in MAPLESS_VIEWS else "")
     body = body.replace("__NAV_LINKS__", _render_nav(view_id, assets_prefix))
     body = body.replace("__PAGE_BODY__", page_body)
 
