@@ -81,14 +81,24 @@
     });
 
     svg.appendChild(svgEl("line", { x1: left, y1: baseY, x2: right, y2: baseY, stroke: "#c9c7c2", "stroke-width": 1 }));
-    var nT = Math.max(2, Math.min(6, Math.floor((right - left) / 80)));
-    for (var i = 0; i <= nT; i++) {
-      var t = t0 + (span * i) / nT, x = xToPx(t);
+    // opts.xTicks: optional [{iso, label}] replacing the evenly spaced date
+    // ticks (e.g. one tick per month for monthly series).
+    var xTicks = opts.xTicks;
+    if (!xTicks) {
+      xTicks = [];
+      var nT = Math.max(2, Math.min(6, Math.floor((right - left) / 80)));
+      for (var i = 0; i <= nT; i++) {
+        var tt = t0 + (span * i) / nT;
+        xTicks.push({ t: tt, label: fmtDay(tt) });
+      }
+    }
+    xTicks.forEach(function (tk) {
+      var x = xToPx(tk.t != null ? tk.t : dayMs(tk.iso));
       svg.appendChild(svgEl("line", { x1: x, y1: baseY, x2: x, y2: baseY + 3, stroke: "#c9c7c2", "stroke-width": 1 }));
       var xl = svgEl("text", { x: x, y: baseY + 13, "font-size": 9, fill: "#9c968b", "text-anchor": "middle" });
-      xl.textContent = fmtDay(t);
+      xl.textContent = tk.label;
       svg.appendChild(xl);
-    }
+    });
 
     var pxPerDay = Math.abs(xToPx(t0 + 86400000) - xToPx(t0));
 
@@ -106,7 +116,7 @@
     return {
       xToPx: xToPx, pxToDate: pxToDate, yToPx: yToPx, yMax: yMax,
       left: left, right: right, top: pad.top, baseY: baseY,
-      barW: Math.max(1, pxPerDay - 1), ticks: ticks, clipId: clipId
+      barW: Math.max(1, pxPerDay - 1), pxPerDay: pxPerDay, ticks: ticks, clipId: clipId
     };
   }
 
@@ -125,7 +135,11 @@
   }
 
   // Stacked bars. `series` is [{values:[], color}] drawn bottom-up.
-  function stackedBars(svg, fr, dates, series) {
+  // opts.barDays (default 1): how many days one bar spans -- 7 for weekly
+  // bars, whose `dates` should then be the MIDDLE of each week.
+  function stackedBars(svg, fr, dates, series, opts) {
+    var barDays = (opts && opts.barDays) || 1;
+    var barW = barDays === 1 ? fr.barW : Math.max(1, fr.pxPerDay * barDays - 2);
     var g = svgEl("g", { "clip-path": "url(#" + fr.clipId + ")" });
     dates.forEach(function (iso, i) {
       var acc = 0;
@@ -134,8 +148,9 @@
         if (v <= 0) return;
         var yTop = fr.yToPx(acc + v), yBot = fr.yToPx(acc);
         g.appendChild(svgEl("rect", {
-          x: fr.xToPx(dayMs(iso)) - fr.barW / 2, y: yTop,
-          width: fr.barW, height: Math.max(0, yBot - yTop), fill: s.color
+          x: fr.xToPx(dayMs(iso)) - barW / 2, y: yTop,
+          width: barW, height: Math.max(0, yBot - yTop),
+          fill: (s.colorAt && s.colorAt(i)) || s.color
         }));
         acc += v;
       });
