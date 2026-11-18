@@ -365,37 +365,6 @@ def _r1(v):
     return None if v is None else round(v, 1)
 
 
-def _pack_turnaround(path: Path):
-    """Per-lab 5-day rolling turnaround (days from sample collection to
-    analysis), from Processing_Code step 3's lab_turnaround_aggregated.csv.
-    {code: {dates, median, q25, q75, n, within2}} -- one point per analysis
-    date the lab has; values describe that lab's samples in the 5 days up to it.
-    """
-    out: dict[str, dict] = {}
-    for r in _read_csv(path):
-        code = _or_none(r.get("lab_name"))
-        day = (r.get("lab_analysis_date") or "").strip()[:10]
-        if not code or not _ISO_RE.match(day):
-            continue
-        lab = out.setdefault(code, {"days": {}})
-        lab["days"][day] = (
-            _r1(_f(r.get("rolling_tat_median"))), _r1(_f(r.get("rolling_tat_q25"))),
-            _r1(_f(r.get("rolling_tat_q75"))), _i0(_f(r.get("rolling_samples"))),
-            _round_prop(_f(r.get("rolling_prop_within_2d"))),
-        )
-    packed = {}
-    for code, lab in out.items():
-        ds = sorted(lab["days"])
-        d = lab["days"]
-        packed[code] = {
-            "dates": ds,
-            "median": [d[x][0] for x in ds], "q25": [d[x][1] for x in ds],
-            "q75": [d[x][2] for x in ds], "n": [d[x][3] for x in ds],
-            "within2": [d[x][4] for x in ds],
-        }
-    return packed
-
-
 def _pack_turnaround_summary(path: Path):
     """{code: {samples, median, q25, q75, within2}} -- whole-period turnaround
     per lab (lab_turnaround_summary.csv, step 3) for the lab table."""
@@ -585,13 +554,14 @@ def load_testing(outputs_dir: Path | None = None):
     pos_path, lab_path = snap / "rolling_positivity.csv", snap / "lab_positivity_aggregated.csv"
     series = _pack_testing(pos_path) if pos_path.exists() else None
     labs = _pack_labs(lab_path) if lab_path.exists() else []
-    tat_path, tat_sum_path = snap / "lab_turnaround_aggregated.csv", snap / "lab_turnaround_summary.csv"
-    turnaround = _pack_turnaround(tat_path) if tat_path.exists() else {}
+    # Whole-period turnaround per lab for the lab table (step 3's summary file).
+    # The rolling series (lab_turnaround_aggregated.csv) isn't shown any more.
+    tat_sum_path = snap / "lab_turnaround_summary.csv"
     tat_summary = _pack_turnaround_summary(tat_sum_path) if tat_sum_path.exists() else {}
     for lab in labs:
         if lab["code"] in tat_summary:
             lab["tat"] = tat_summary[lab["code"]]
-    if not series and not labs and not turnaround:
+    if not series and not labs:
         return None
     asof = snap.name
     windows_for_backfill = _load_cases_incomplete_windows(snap, asof)
@@ -616,7 +586,6 @@ def load_testing(outputs_dir: Path | None = None):
         "incomplete_from": (date.fromisoformat(asof) - timedelta(days=_manifest_incomplete_days(base))).isoformat(),
         "incomplete_windows": windows,
         "backfill": backfill,
-        "turnaround": turnaround,
         "national": (series or {}).get("national", {}).get("national"),
         "provinces": (series or {}).get("province", {}),
         "health_zones": (series or {}).get("healthzone", {}),

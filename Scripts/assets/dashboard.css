@@ -1688,7 +1688,6 @@
   .surv-legend { display:flex; flex-wrap:wrap; gap:4px 6px; margin:0 0 4px; min-height:0; }
   .surv-legend:empty { display:none; }
   .surv-legend-note { flex-basis:100%; font-size:10.5px; line-height:1.4; color:#6f6a60; margin-top:2px; }
-  .surv-chip.surv-chip-action { font-weight:600; }
   .surv-chip, .surv-key {
     display:inline-flex; align-items:center; gap:5px;
     font-size:10.5px; color:#5c574f; background:#fff;

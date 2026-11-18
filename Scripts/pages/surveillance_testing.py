@@ -89,9 +89,6 @@ _BODY = f"""<div id="surv-page">
         {_card("surv-labs", "ui.surv.labs_title", "Laboratory throughput",
                "ui.surv.labs_tip", "Samples analysed per week by laboratory, by date of analysis. Click a laboratory in the legend to hide or show it. The table lists every laboratory's totals.",
                wide=True)}
-        {_card("surv-tat", "ui.surv.tat_title", "Laboratory turnaround time",
-               "ui.surv.tat_tip", "Days from sample collection to laboratory analysis: median over each laboratory's samples analysed in the previous 5 days, by date of analysis. Hover for the interquartile range and number of samples. Click a laboratory in the legend to hide or show it.",
-               wide=True)}
       </div>
       <div class="surv-table-wrap" id="surv-labs-table"></div>
     </section>

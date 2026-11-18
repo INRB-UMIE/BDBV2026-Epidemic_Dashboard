@@ -190,11 +190,9 @@ def _seed_tat_and_backfill(tmp_path):
     return out
 
 
-def test_turnaround_is_packed_per_lab_and_joined_to_the_lab_table(tmp_path):
+def test_turnaround_summary_is_joined_to_the_lab_table(tmp_path):
     te = surv.load_testing(_seed_tat_and_backfill(tmp_path))
-    t = te["turnaround"]["LBNIZ"]
-    assert t["dates"] == ["2026-05-02", "2026-05-03"]          # sorted
-    assert t["median"] == [1.0, 2.0] and t["q75"] == [2.0, 3.2] and t["n"] == [6, 4]
+    assert "turnaround" not in te                              # rolling series no longer shipped
     assert te["labs"][0]["tat"] == {"samples": 10, "median": 1.5, "q25": 1.0, "q75": 2.8, "within2": 0.8}
 
 
@@ -216,14 +214,14 @@ def test_testing_without_turnaround_or_backfill_files(tmp_path):
               "reporting_backfill/backfill_completeness_by_lag.csv"):
         (snap / f).unlink()
     te = surv.load_testing(out)
-    assert te["turnaround"] == {} and te["backfill"] is None and "tat" not in te["labs"][0]
+    assert te["backfill"] is None and "tat" not in te["labs"][0]
 
 
 def test_page_drops_known_contacts_card_and_adds_new_cards():
     page = importlib.import_module("pages.surveillance_testing")
     html = page.build_page(dict(MINIMAL, surveillance={"testing": None, "contact_tracing": None}))
     assert "surv-ct-known" not in html
-    assert 'id="surv-backfill"' in html and 'id="surv-tat"' in html
+    assert 'id="surv-backfill"' in html and 'id="surv-tat"' not in html
     assert 'id="surv-ct-scope"' in html                     # dropdown moved, not lost
 
 
