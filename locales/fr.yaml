@@ -313,6 +313,7 @@ ui:
     header_info: "Plus d'informations"
     language: "Langue"
     genomic_resize: "Glisser pour redimensionner"
+    genomic_tree_resize: "Glisser pour modifier la hauteur de l'arbre (double-clic pour réinitialiser)"
 
   genomic:
     sample_summary: "{n} génomes échantillonnés entre le {start} et le {end}, dernière mise à jour le {updated}"

@@ -313,6 +313,7 @@ ui:
     header_info: "More information"
     language: "Language"
     genomic_resize: "Drag to resize"
+    genomic_tree_resize: "Drag to change the tree's height (double-click to reset)"
 
   genomic:
     sample_summary: "{n} genomes sampled between {start} and {end}, last updated {updated}"

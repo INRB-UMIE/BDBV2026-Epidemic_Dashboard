@@ -1569,6 +1569,24 @@
   body.genomic-resizing #genomic-resize::before { background: #9b7d4e; width: 3px; left: 2px; }
   body.genomic-resizing { cursor: col-resize; user-select: none; }
 
+  /* Drag handle under the phylogeny: changes .gen-tree-wrap's height
+     (genomic.js initTreeResize). Same look as #genomic-resize, turned sideways. */
+  #genomic-panel .gen-tree-resize {
+    position: relative; height: 10px; margin: 2px -2px -6px; cursor: row-resize;
+  }
+  #genomic-panel .gen-tree-resize::before {
+    content: ""; position: absolute; left: 0; right: 0; top: 4px; height: 1px; background: #e7e3db;
+  }
+  #genomic-panel .gen-tree-resize::after {
+    content: ""; position: absolute; left: 50%; top: 2px; width: 28px; height: 5px; margin-left: -14px;
+    border-top: 1px solid #c9c4b8; border-bottom: 1px solid #c9c4b8;
+  }
+  #genomic-panel .gen-tree-resize:hover::before,
+  #genomic-panel .gen-tree-resize:focus-visible::before,
+  body.genomic-tree-resizing #genomic-panel .gen-tree-resize::before { background: #9b7d4e; height: 3px; top: 3px; }
+  #genomic-panel .gen-tree-resize:focus-visible { outline: none; }
+  body.genomic-tree-resizing { cursor: row-resize; user-select: none; }
+
 
   /* ── Map-free pages (body.mapless-view; Surveillance and Testing) ──────
      Same hide list as the stub pages: the map engine still loads, but the
