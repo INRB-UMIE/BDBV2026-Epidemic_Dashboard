@@ -64,12 +64,12 @@ from common.payload import build_shared_payload
 from common.theme import load_theme_css
 from pages import (
     snapshot, spatial_risk, trends, context,
-    clinical_symptoms, surveillance_testing, genomic_epidemiology,
+    clinical_symptoms, surveillance_testing, genomic_epidemiology, reports,
 )
 
 PAGE_MODULES = [
     snapshot, trends, spatial_risk, context,
-    clinical_symptoms, surveillance_testing, genomic_epidemiology,
+    clinical_symptoms, surveillance_testing, genomic_epidemiology, reports,
 ]
 
 
@@ -136,7 +136,7 @@ def _write_shared_assets(assets_dir) -> tuple[int, int]:
     # charts.js is written unconditionally alongside engine.js; trends.js is
     # referenced only by trends.html, surveillance.js only by
     # surveillance-testing.html, clinical.js only by clinical-symptoms.html.
-    for name in ("charts.js", "trends.js", "surveillance.js", "snapshot.js", "clinical.js"):
+    for name in ("charts.js", "trends.js", "surveillance.js", "snapshot.js", "clinical.js", "reports.js"):
         (assets_dir / name).write_text(
             (SCRIPT_DIR / "assets" / name).read_text(encoding="utf-8"), encoding="utf-8")
 

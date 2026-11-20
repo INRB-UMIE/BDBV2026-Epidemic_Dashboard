@@ -23,7 +23,7 @@ Please note that the epidemiological data presented here is based on work in pro
 - **ic_model_estimates.csv** (optional) Imperial College model date and case bounds for the tracker tooltip (`PAYLOAD.ic_model`; independent of INSP sitreps).
 - **caveats.csv** (optional) Per-metric warnings in the title-panel tracker: `metric` (`confirmed_cases`, `suspected_cases`, `confirmed_deaths`, `suspected_deaths`) and `warning` text; adds a mark beside the count and a footnote below.
 - **dashboard_plots/** (optional) The aggregated CSVs the Trends tab charts are drawn from (`manifest.json` + `<date>/{status_aggregated,cumulative_positive_deaths,rolling_positivity,lab_positivity_aggregated}.csv`), produced by [BDBV2026-Processed_Sensitive_Data](https://github.com/INRB-UMIE/BDBV2026-Processed_Sensitive_Data)'s `outputs/` directory. The build reads this directly, no copying into `Data/dashboard_plots/` needed. By default it assumes that repo is cloned as a sibling of this one (`../BDBV2026-Processed_Sensitive_Data/outputs`); set `DASHBOARD_PLOTS_DIR` to override. The same directory also holds pre-rendered SVGs of these charts, which the dashboard **no longer reads** — it draws them client-side from the CSVs instead (see `Scripts/assets/trends.js` and `Scripts/assets/charts.js`). The charts must stay faithful to the *data* produced by `BDBV2026-Processing_Code`'s `4-make-dashboard-plots.R`; their visual style follows the Genomic Epidemiology tab. See `docs/superpowers/specs/2026-09-22-trends-dynamic-charts-design.md`.
-- **inrb_dashboard_Rt_data_<YYYYMMDD>.csv** (optional) Time-varying reproduction number (Rt) estimates, national and by province (`area,area_type,date,rt_mean,rt_lower_95,rt_upper_95`; `area_type` is `national` or `province`). The newest file by the run date in its name is used (`Scripts/common/rt.py` → `PAYLOAD.rt`). Drawn as the Reproduction Number card on the Epidemiological Trends tab (zone and area selections show their province's estimate) and summarised on the Current Snapshot tab (national Rt and provinces ranked). To update, add a new dated file; older files can stay or be removed.
+- **inrb_dashboard_Rt_data_<YYYYMMDD>.csv** (optional) Time-varying reproduction number (Rt) estimates, national and by province (`area,area_type,date,rt_mean,rt_lower_95,rt_upper_95`; `area_type` is `national` or `province`). The newest file by the run date in its name is used (`Scripts/common/rt.py` → `PAYLOAD.rt`). Drawn as the Reproduction Number card on the Epidemiological Trends tab (zone and area selections show their province's estimate) and summarised on the Current Snapshot tab (national Rt and provinces ranked). To update, add a new dated file; older files can stay or be removed. The build can also read the newest file from GitHub: set `RT_GITHUB_TOKEN` (fine-grained PAT, Contents: Read) and it checks `mrc-ide/ebola-bvd-2026-outputs`, branch `inrb-dashboard-data`, folder `inrb_dashboard` (override with `RT_REMOTE_REPO`, `RT_REMOTE_REF`, `RT_REMOTE_PATH`). The later run date wins between GitHub and `Data/`; with no token or no network it uses `Data/` alone. In CI, add the PAT as the repo secret `RT_GITHUB_TOKEN`.
 - **health_area_aliases.csv** (optional) Hand-curated fixes for health areas whose line-list name differs from the health-area shapefile by more than a typo (columns `health_zone,health_area,shapefile_zone,shapefile_area`). Used only to attach map outlines to the Trends tab's Health Area scope; see below.
 - **Methods** Methods for dashboard, see below.
 - **ToS** ToS for dashboard, see below. 
@@ -158,6 +158,7 @@ BDBV-Epidemic_Dashboard/
 │       ├── clinical_symptoms.py     # "Clinical Symptoms" (stub)   -> output/clinical-symptoms.html
 │       ├── surveillance_testing.py  # "Surveillance and Testing" (map-free) -> output/surveillance-testing.html
 │       └── genomic_epidemiology.py  # "Genomic Epidemiology" (stub) -> output/genomic-epidemiology.html
+│       └── reports.py               # "Reports" (map-free)        -> output/reports.html
 ├── layer_config.yaml               # map layer exclusions, labels, palettes (requires PyYAML)
 ├── requirements.txt                # Python dependencies for the build script
 ├── Data/
@@ -183,6 +184,10 @@ BDBV-Epidemic_Dashboard/
 │   clinical-symptoms.html, surveillance-testing.html, genomic-epidemiology.html  # publicly served copies
 └── assets/                         # publicly served copy of output/assets/
 ```
+
+### Reports tab
+
+`reports.html` lists every PDF in [BDBV2026-Reports](https://github.com/INRB-UMIE/BDBV2026-Reports) as cards, one section per top-level folder (the folder with the most recent report first), newest report first within each. Nothing is hard-coded: a new folder or PDF appears at the next build (`Scripts/common/reports.py` reads the GitHub API, falling back to a local checkout via `REPORTS_DIR` or a sibling `BDBV2026-Reports/`; `REPORTS_FETCH=0` skips GitHub). Name files `YYYY-MM-DD_<title>_<EN|FR>.pdf`: the date and language are read from the name, files sharing a date in one folder become one card with a button per language, and non-matching names are skipped with a build note. Section titles come from `ui.reports.folders.<Folder>` in `locales/*.yaml`, falling back to the folder name. The PDFs are linked (via jsDelivr), not embedded.
 
 ### Multi-page structure
 

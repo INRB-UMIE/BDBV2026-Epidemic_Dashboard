@@ -134,6 +134,7 @@ PAGE_FILENAMES = {
     "clinical-symptoms": "clinical-symptoms.html",
     "surveillance-testing": "surveillance-testing.html",
     "genomic-epidemiology": "genomic-epidemiology.html",
+    "reports": "reports.html",
 }
 
 ASSETS_DIRNAME = "assets"

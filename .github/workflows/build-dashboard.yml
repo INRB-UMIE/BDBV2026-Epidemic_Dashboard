@@ -40,6 +40,7 @@ on:
       - "clinical-symptoms.html"
       - "surveillance-testing.html"
       - "genomic-epidemiology.html"
+      - "reports.html"
       - "assets/**"
       - "pr-preview/**"
   workflow_dispatch:
@@ -244,6 +245,9 @@ jobs:
           # it lives in one rotatable place rather than in the source. If the
           # secret is unset the build still succeeds and the map is watermarked.
           CARTO_BASEMAP_KEY: ${{ secrets.CARTO_BASEMAP_KEY }}
+          # Fine-grained PAT, Contents: Read on mrc-ide/ebola-bvd-2026-outputs. Optional: unset,
+          # expired or forks without secrets -> the build falls back to Data/ Rt files.
+          RT_GITHUB_TOKEN: ${{ secrets.RT_GITHUB_TOKEN }}
         run: |
           set -euo pipefail
           python Scripts/build_dashboard.py
@@ -258,6 +262,7 @@ jobs:
           cp output/clinical-symptoms.html clinical-symptoms.html
           cp output/surveillance-testing.html surveillance-testing.html
           cp output/genomic-epidemiology.html genomic-epidemiology.html
+          cp output/reports.html reports.html
           rm -rf assets
           cp -r output/assets assets
 
@@ -273,7 +278,7 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add output/ index.html spatial-risk.html trends.html context.html \
-            clinical-symptoms.html surveillance-testing.html genomic-epidemiology.html assets/
+            clinical-symptoms.html surveillance-testing.html genomic-epidemiology.html reports.html assets/
           if git diff --cached --quiet; then
             echo "No HTML changes to commit."
             exit 0

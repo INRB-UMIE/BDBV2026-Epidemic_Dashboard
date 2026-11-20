@@ -98,3 +98,28 @@ def test_trends_rt_card_hides_when_level_not_estimated():
     assert 'cardEl.style.display = available ? "" : "none"' in js
     # No fallback that shows a province's Rt for a zone/area selection.
     assert "zoneProvince" not in js[js.index("Card 4: reproduction number"):js.index("function renderRt(")]
+
+
+def test_remote_newer_than_local_wins(tmp_path, monkeypatch):
+    import common.rt as rt
+    _write(tmp_path, "inrb_dashboard_Rt_data_20261102.csv", "National,national,2026-10-01,1.1,0.9,1.3\n")
+    body = HEADER + "National,national,2026-11-01,0.9,0.7,1.1\n"
+    monkeypatch.setattr(rt, "latest_remote_rt", lambda: ("inrb_dashboard_Rt_data_20261118.csv", body))
+    out = rt.load_rt_estimates(tmp_path)
+    assert out["run_date"] == "2026-11-18" and out["national"]["dates"] == ["2026-11-01"]
+
+
+def test_local_wins_a_tie_and_remote_failure_falls_back(tmp_path, monkeypatch):
+    import common.rt as rt
+    _write(tmp_path, "inrb_dashboard_Rt_data_20261118.csv", "National,national,2026-10-01,1.1,0.9,1.3\n")
+    monkeypatch.setattr(rt, "latest_remote_rt",
+                        lambda: ("inrb_dashboard_Rt_data_20261118.csv", HEADER + "National,national,2026-11-01,0.9,0.7,1.1\n"))
+    assert rt.load_rt_estimates(tmp_path)["national"]["dates"] == ["2026-10-01"]
+    monkeypatch.setattr(rt, "latest_remote_rt", lambda: None)
+    assert rt.load_rt_estimates(tmp_path)["run_date"] == "2026-11-18"
+
+
+def test_no_token_means_no_network(monkeypatch):
+    import common.rt as rt
+    monkeypatch.delenv("RT_GITHUB_TOKEN", raising=False)
+    assert rt.latest_remote_rt() is None

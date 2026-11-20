@@ -195,6 +195,9 @@ jobs:
           # sits in one rotatable place; forks get an empty value and build a
           # watermarked -- but working -- preview.
           CARTO_BASEMAP_KEY: ${{ secrets.CARTO_BASEMAP_KEY }}
+          # Fine-grained PAT, Contents: Read on mrc-ide/ebola-bvd-2026-outputs. Optional: unset,
+          # expired or forks without secrets -> the build falls back to Data/ Rt files.
+          RT_GITHUB_TOKEN: ${{ secrets.RT_GITHUB_TOKEN }}
         run: |
           set -euo pipefail
           python Scripts/build_dashboard.py
@@ -205,6 +208,7 @@ jobs:
           cp output/clinical-symptoms.html clinical-symptoms.html
           cp output/surveillance-testing.html surveillance-testing.html
           cp output/genomic-epidemiology.html genomic-epidemiology.html
+          cp output/reports.html reports.html
           rm -rf assets
           cp -r output/assets assets
 
@@ -215,7 +219,7 @@ jobs:
           rm -rf preview-site
           mkdir -p preview-site
           cp index.html spatial-risk.html trends.html context.html \
-            clinical-symptoms.html surveillance-testing.html genomic-epidemiology.html \
+            clinical-symptoms.html surveillance-testing.html genomic-epidemiology.html reports.html \
             preview-site/
           cp -r assets preview-site/
 
