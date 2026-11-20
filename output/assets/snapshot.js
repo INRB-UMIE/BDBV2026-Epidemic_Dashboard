@@ -794,26 +794,12 @@
     });
   })();
 
-  // ── One compact map widget: LAYER + legend ─────────────────────────────
-  // The shared markup (common/chrome.py) has #controls and #legend as two
-  // floating panels. On Snapshot the map pane is narrower than the summary
-  // rail, so the legend's body moves into #controls, under the layer select,
-  // and #legend is hidden (CSS: body.snapshot-combined-legend). Nodes are moved,
-  // not copied, so engine.js's updateLegend() keeps writing to the same ids.
-  // #legend-title stays behind in the hidden #legend: the select already
-  // names the layer.
-  (function combineLayerAndLegend() {
-    var controls = document.getElementById("controls");
-    var legend = document.getElementById("legend");
-    var select = document.getElementById("layer-select");
-    var lbody = legend && legend.querySelector(".panel-body");
-    if (!controls || !lbody || !select) return;
-    var wrap = document.createElement("div");
-    wrap.id = "controls-legend";
-    while (lbody.firstChild) wrap.appendChild(lbody.firstChild);
-    select.parentNode.insertBefore(wrap, select.nextSibling);
-    document.body.classList.add("snapshot-combined-legend");
-  })();
+  // ── Compact LAYER box; the legend keeps its own panel ──────────────────
+  // The legend used to be moved into #controls here. It now stays in #legend,
+  // pinned bottom-right of the map pane like the Trends / Spatial Risk legends
+  // (dashboard.css: body.view-map #legend). This class only keeps the layer
+  // box compact.
+  document.body.classList.add("snapshot-compact-controls");
 
   global.SnapshotSummary = { render: render };
   // engine.js rendered before this file loaded; draw the initial state now,
