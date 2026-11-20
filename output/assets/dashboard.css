@@ -1611,7 +1611,7 @@
 
   /* Surveillance and Testing tab (surveillance.js). Cards follow the genomic
      tab's look (white card, warm border, hover-for-details title). */
-  #surv-page, #clin-page {
+  #surv-page, #clin-page, #rep-page {
     position:absolute; top:0; left:0; right:0; bottom:var(--view-chrome-height);
     overflow-y:auto; -webkit-overflow-scrolling:touch;
     background:#f6f5f2; color:#2a2a27; font-size:13px; line-height:1.4;
@@ -1630,7 +1630,32 @@
   }
   #surv-nav .surv-nav-link:hover { color:#01454f; background:#efede8; }
   #surv-nav .surv-nav-link.active { color:#01454f; font-weight:700; border-left-color:#1a8c99; background:#fff; }
-  #surv-inner, #clin-inner { flex:1 1 auto; min-width:0; max-width:1280px; margin:0 auto; padding:14px 18px 28px; box-sizing:border-box; }
+  #surv-inner, #clin-inner, #rep-inner { flex:1 1 auto; min-width:0; max-width:1280px; margin:0 auto; padding:14px 18px 28px; box-sizing:border-box; }
+  /* Reports tab (reports.js): one section per folder, a card per report. */
+  .rep-count { font-size:11px; font-weight:400; color:#9c968b; margin-left:4px; }
+  .rep-grid { display:grid; grid-template-columns:repeat(auto-fill, minmax(230px, 1fr)); gap:10px; }
+  .rep-card {
+    background:#fff; border:1px solid #e7e3db; border-radius:4px; padding:10px 12px;
+    display:flex; flex-direction:column; gap:6px; min-width:0;
+  }
+  .rep-card-top { display:flex; align-items:center; justify-content:space-between; gap:8px; }
+  .rep-date { font-size:11.5px; color:#5c574f; }
+  .rep-badge {
+    font-size:10px; font-weight:700; text-transform:uppercase; letter-spacing:.04em;
+    color:#01454f; background:#e3f0f1; border-radius:10px; padding:1px 7px;
+  }
+  .rep-title { margin:0; font-size:14px; font-weight:700; color:#01454f; overflow-wrap:anywhere; }
+  .rep-actions { display:flex; flex-wrap:wrap; gap:6px; margin-top:auto; padding-top:4px; }
+  .rep-btn {
+    display:inline-flex; flex-direction:column; gap:1px; padding:5px 10px; border-radius:4px;
+    border:1px solid #c4bdb0; background:#fff; color:#01454f; text-decoration:none; line-height:1.25;
+  }
+  .rep-btn:hover, .rep-btn:focus-visible { border-color:#1a8c99; background:#f1f8f8; outline:none; }
+  .rep-btn-primary { background:#1a8c99; border-color:#1a8c99; color:#fff; }
+  .rep-btn-primary:hover, .rep-btn-primary:focus-visible { background:#01454f; border-color:#01454f; }
+  .rep-btn-lang { font-size:12.5px; font-weight:700; }
+  .rep-btn-size { font-size:10.5px; opacity:.8; }
+  .rep-empty { color:#5c574f; margin:18px 0; }
   .surv-sec { scroll-margin-top:8px; }
   .surv-subsection { margin:14px 0 6px; font-size:12.5px; font-weight:700; color:#01454f; }
   .surv-intro {

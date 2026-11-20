@@ -17,6 +17,7 @@ from datetime import datetime, timezone
 from common.data_sources import *  # noqa: F401,F403 -- re-export all loaders/constants
 from common.surveillance import load_surveillance
 from common.clinical import load_clinical
+from common.reports import load_reports
 from common.snapshot_summary import build_snapshot_summary
 from common.rt import load_rt_estimates
 from common.paths import (
@@ -128,6 +129,7 @@ def build_shared_payload() -> dict:
     rt = load_rt_estimates()
     surveillance = load_surveillance()
     clinical = load_clinical()
+    reports = load_reports()
     if clinical:
         print(f"  clinical: {clinical['asof']}, {len(clinical['locations'])} locations")
     if surveillance:
@@ -243,6 +245,7 @@ def build_shared_payload() -> dict:
         "trends": trends,
         "surveillance": surveillance,
         "clinical": clinical,
+        "reports": reports,
         "rt": rt,
         "invasion_risk": invasion_risk,
         "import_force_pairwise": import_force_pairwise,

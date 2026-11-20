@@ -134,6 +134,7 @@ ui:
   view_clinical_symptoms: "Clinical Symptoms"
   view_surveillance_testing: "Surveillance and Testing"
   view_genomic_epidemiology: "Genomic Epidemiology"
+  view_reports: "Reports"
   stub_coming_soon: "Coming soon."
   trends_scope: "Geographic scope"
   trends_scope_national: "National"
@@ -628,3 +629,13 @@ ui:
     role_nurse: "Nurses"
     role_doctor: "Doctors"
     role_other: "Other / unspecified role"
+  reports:
+    intro: "Reports published for this outbreak, grouped by type. Each opens as a PDF in a new tab."
+    latest: "Latest"
+    empty: "No reports are available yet."
+    open_aria: "Open the {lang} PDF"
+    folders:
+      Contact_Tracing: "Contact tracing"
+      Genomic: "Genomic epidemiology"
+      Rt: "Reproduction number (Rt)"
+      Spatial_Invasion: "Spatial invasion risk"

@@ -28,6 +28,7 @@ NAV_ITEMS = [
     ("clinical-symptoms", "ui.view_clinical_symptoms", "Clinical Symptoms"),
     ("surveillance-testing", "ui.view_surveillance_testing", "Surveillance and Testing"),
     ("genomic-epidemiology", "ui.view_genomic_epidemiology", "Genomic Epidemiology"),
+    ("reports", "ui.view_reports", "Reports"),
 ]
 
 # Views still built (output/<page>.html works if opened directly) but left out
@@ -48,7 +49,7 @@ STUB_VIEWS: set[str] = set()
 # zone search are hidden (body class "mapless-view") and the page's own
 # full-width content (page_body) fills the area instead. The engine and the
 # shared payload still load underneath, as on every page.
-MAPLESS_VIEWS = {"surveillance-testing", "clinical-symptoms"}
+MAPLESS_VIEWS = {"surveillance-testing", "clinical-symptoms", "reports"}
 
 HEAD_TEMPLATE = r"""<!doctype html>
 <html lang="en">
@@ -459,6 +460,7 @@ PAGE_TITLES = {
     "clinical-symptoms": "DRC Ebola Bundibugyo - Epidemic Intelligence Dashboard — clinical symptoms",
     "surveillance-testing": "DRC Ebola Bundibugyo - Epidemic Intelligence Dashboard — surveillance and testing",
     "genomic-epidemiology": "DRC Ebola Bundibugyo - Epidemic Intelligence Dashboard — genomic epidemiology",
+    "reports": "DRC Ebola Bundibugyo - Epidemic Intelligence Dashboard — reports",
 }
 
 
@@ -500,6 +502,8 @@ _PAGE_SCOPED_PAYLOAD_KEYS = {
     "surveillance": {"surveillance-testing"},
     # Clinical summary tables (common/clinical.py); only the Clinical Symptoms tab.
     "clinical": {"clinical-symptoms"},
+    # Report list (common/reports.py); only the Reports tab.
+    "reports": {"reports"},
     # Digest of trends/surveillance/genomic for the Snapshot summary rail.
     "snapshot_summary": {"map"},
     # Rt time series (common/rt.py): Trends card + Snapshot summary card.
