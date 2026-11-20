@@ -1779,7 +1779,10 @@
     width:min(var(--layer-panel-width), calc(100% - var(--snapshot-panel-width) - 24px));
     max-width:min(var(--layer-panel-width), calc(100% - var(--snapshot-panel-width) - 24px));
   }
+  /* Bottom-right of the map pane (left of the summary rail), matching the
+     Trends / Spatial Risk legends. */
   body.view-map #legend {
+    left:auto; right:calc(var(--snapshot-panel-width) + 12px);
     max-width:min(360px, calc(100% - var(--snapshot-panel-width) - 24px));
   }
   /* Map hints centre on the map pane, not on the whole viewport. */
@@ -1923,7 +1926,7 @@
     #snapshot-split-handle { display:none !important; }
     body.view-map #controls { width:var(--layer-panel-width); max-width:var(--layer-panel-width); }
     body.view-map #controls.collapsed { width:auto; max-width:min(160px, calc(60vw - 18px)); }
-    body.view-map #legend { max-width:60vw; bottom:auto; top:calc(40vh - 12px); transform:translateY(-100%); }
+    body.view-map #legend { max-width:60vw; left:auto; right:12px; bottom:auto; top:calc(40vh - 12px); transform:translateY(-100%); }
     body.view-map #travel-hint,
     body.view-map #flow-hint,
     body.view-map #flow-empty-hint { left:50%; max-width:calc(100vw - 48px); }
@@ -1946,34 +1949,27 @@
   .snap-trend-flat { color:#9c968b; }
   #snap-trend { border-left:3px solid #9b7d4e; }
   .snap-case-tag { color:#9e2b2b; }
-  /* ── Snapshot: compact combined LAYER + legend widget (snapshot.js moves the
-     legend body into #controls and sets body.snapshot-combined-legend). ── */
-  body.snapshot-combined-legend #legend { display:none !important; }
-  body.view-map.snapshot-combined-legend #controls {
+  /* ── Snapshot: compact LAYER box (snapshot.js sets
+     body.snapshot-compact-controls). The legend is its own panel. ── */
+  body.view-map.snapshot-compact-controls #controls {
     width:min(250px, calc(100% - var(--snapshot-panel-width) - 24px));
     max-width:min(250px, calc(100% - var(--snapshot-panel-width) - 24px));
     padding:7px 10px 8px; font-size:11.5px; line-height:1.35;
   }
-  body.snapshot-combined-legend #controls .panel-header strong { font-size:10px; }
-  body.snapshot-combined-legend #controls .panel-toggle { width:18px; height:18px; font-size:12px; }
+  body.snapshot-compact-controls #controls .panel-header strong { font-size:10px; }
+  body.snapshot-compact-controls #controls .panel-toggle { width:18px; height:18px; font-size:12px; }
   /* Visually hidden, still the select's accessible name. */
-  body.snapshot-combined-legend #controls label[for="layer-select"] {
+  body.snapshot-compact-controls #controls label[for="layer-select"] {
     position:absolute; width:1px; height:1px; overflow:hidden; clip-path:inset(50%); white-space:nowrap;
   }
-  body.snapshot-combined-legend #controls select { margin-top:6px; padding:3px 4px; font-size:11.5px; }
-  #controls-legend { margin-top:7px; }
-  #controls-legend .legend-bar { width:100%; height:9px; border-radius:2px; }
-  #controls-legend .legend-ticks { width:100%; font-size:9.5px; margin-top:1px; }
-  #controls-legend .legend-scale { font-size:9.5px; margin-top:1px; }
-  #controls-legend #legend-gray { font-size:10px !important; margin-top:3px !important; line-height:1.4; }
-  #controls-legend .legend-flow-row { margin-top:2px; }
-  body.snapshot-combined-legend #controls .checkbox-row { margin-top:4px; gap:5px; font-size:11px; }
-  body.snapshot-combined-legend #controls .checkbox-row input { margin:0; }
-  body.snapshot-combined-legend #controls .footer { margin-top:5px; font-size:9.5px; line-height:1.35; }
+  body.snapshot-compact-controls #controls select { margin-top:6px; padding:3px 4px; font-size:11.5px; }
+  body.snapshot-compact-controls #controls .checkbox-row { margin-top:4px; gap:5px; font-size:11px; }
+  body.snapshot-compact-controls #controls .checkbox-row input { margin:0; }
+  body.snapshot-compact-controls #controls .footer { margin-top:5px; font-size:9.5px; line-height:1.35; }
   @media (max-width: 700px) {
     /* Map is full width above the rail here. */
-    body.view-map.snapshot-combined-legend #controls { width:min(250px, calc(100vw - 24px)); max-width:min(250px, calc(100vw - 24px)); }
-    body.view-map.snapshot-combined-legend #controls.collapsed { width:auto; max-width:min(160px, calc(60vw - 18px)); }
+    body.view-map.snapshot-compact-controls #controls { width:min(250px, calc(100vw - 24px)); max-width:min(250px, calc(100vw - 24px)); }
+    body.view-map.snapshot-compact-controls #controls.collapsed { width:auto; max-width:min(160px, calc(60vw - 18px)); }
   }
   /* Snapshot Rt card: national figure + sparkline beside the ranked provinces. */
   .snap-rt { display:grid; grid-template-columns:repeat(auto-fit, minmax(250px, 1fr)); gap:10px 22px; }
