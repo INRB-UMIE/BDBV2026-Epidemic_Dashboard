@@ -3889,13 +3889,15 @@ def _list_genomic_report_filenames_from_github(path: str | None = None) -> list[
         f"https://api.github.com/repos/{GENOMIC_REPORTS_REPO}"
         f"/contents/{path or GENOMIC_REPORTS_PATH}?ref={GENOMIC_REPORTS_REF}"
     )
-    req = urllib.request.Request(
-        api,
-        headers={
-            "User-Agent": INSP_FETCH_USER_AGENT,
-            "Accept": "application/vnd.github+json",
-        },
-    )
+    headers = {
+        "User-Agent": INSP_FETCH_USER_AGENT,
+        "Accept": "application/vnd.github+json",
+    }
+    # Optional token: lifts the anonymous 60 requests/hour GitHub limit to 5,000.
+    token = os.environ.get("GITHUB_TOKEN", "").strip()
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+    req = urllib.request.Request(api, headers=headers)
     try:
         with urllib.request.urlopen(
             req, timeout=INSP_FETCH_TIMEOUT_S, context=ssl.create_default_context(),

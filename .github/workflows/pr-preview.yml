@@ -198,6 +198,8 @@ jobs:
           # Fine-grained PAT, Contents: Read on mrc-ide/ebola-bvd-2026-outputs. Optional: unset,
           # expired or forks without secrets -> the build falls back to Data/ Rt files.
           RT_GITHUB_TOKEN: ${{ secrets.RT_GITHUB_TOKEN }}
+          # Lifts the anonymous GitHub API limit (60/hr) when listing the public reports repo.
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
           python Scripts/build_dashboard.py
